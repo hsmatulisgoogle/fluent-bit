@@ -44,8 +44,9 @@ else()
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -D__FILENAME__=__FILE__")
 endif()
 
-SET(GCC_LIBCURL_LINK_FLAGS    "-L/usr/lib/x86_64-linux-gnu -lcurl")
-SET(CMAKE_EXE_LINKER_FLAGS  "${CMAKE_EXE_LINKER_FLAGS} ${GCC_COVERAGE_LINK_FLAGS}")
+set(CURL_LIBRARY "-lcurl") 
+find_package(CURL REQUIRED)
+include_directories(${CURL_INCLUDE_DIR})
 
 
 include(GNUInstallDirs)

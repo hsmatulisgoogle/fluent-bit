@@ -9,4 +9,4 @@ set(src
   stackdriver_helper.c
   )
 
-FLB_PLUGIN(out_stackdriver "${src}" "")
+FLB_PLUGIN(out_stackdriver "${src}" "curl")
