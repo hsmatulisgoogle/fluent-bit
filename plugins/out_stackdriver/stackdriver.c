@@ -27,7 +27,12 @@
 #include <fluent-bit/flb_regex.h>
 
 #include <msgpack.h>
+
 #include <curl/curl.h>
+
+#include <stdlib.h>
+#include <string.h>
+#include <pthread.h>
 
 #include "gce_metadata.h"
 #include "stackdriver.h"
@@ -1246,10 +1251,7 @@ static int pack_json_payload(int insert_id_extracted,
         return ret;
 }
 
-static int stackdriver_format(struct flb_config *config,
-                              struct flb_input_instance *ins,
-                              void *plugin_context,
-                              void *flush_ctx,
+static int stackdriver_format(struct flb_stackdriver *ctx,
                               const char *tag, int tag_len,
                               const void *data, size_t bytes,
                               void **out_data, size_t *out_size)
@@ -1271,7 +1273,6 @@ static int stackdriver_format(struct flb_config *config,
     msgpack_sbuffer mp_sbuf;
     msgpack_packer mp_pck;
     flb_sds_t out_buf;
-    struct flb_stackdriver *ctx = plugin_context;
 
     /* Parameters for severity */
     int severity_extracted = FLB_FALSE;
@@ -1791,6 +1792,55 @@ static void set_authorization_header(struct flb_http_client *c,
     flb_http_add_header(c, "Authorization", 13, header, len);
 }
 
+
+struct cb_stackdriver_flush_param {
+    flb_sds_t payload_buf;
+    size_t payload_size;
+    char* token;
+};
+
+static void* cb_stackdriver_flush_thread(void* arg){
+    // Load arguments from pointer
+    struct cb_stackdriver_flush_param* flush_arg = (struct cb_stackdriver_flush_param*) arg;
+    const flb_sds_t payload_buf = flush_arg->payload_buf;
+    size_t payload_size = flush_arg->payload_size;
+    char* token = flush_arg->token;
+    free(flush_arg);
+
+    CURL *curl = curl_easy_init();
+
+    if (curl == NULL){
+        fprintf(stderr, "cannot initialize curl\n");
+        return NULL;
+    }
+    curl_easy_setopt(curl, CURLOPT_URL, FLB_STD_WRITE_URL);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Fluent-Bit");
+    curl_easy_setopt(curl, CURLOPT_POST, 1L);
+ 
+    struct curl_slist *hs=NULL;
+    char header[512];
+    snprintf(header, sizeof(header) - 1, "Authorization: Bearer %s", token);
+    hs = curl_slist_append(hs, "Content-Type: application/json");
+    hs = curl_slist_append(hs, header);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hs);
+    
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, payload_size);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload_buf);
+ 
+    CURLcode res = curl_easy_perform(curl);
+    curl_easy_cleanup(curl);
+
+    if (res != CURLE_OK){
+        /* we got an error */        
+        fprintf(stderr, "error making curl request\n");
+    }
+    /* Cleanup */
+    flb_sds_destroy(payload_buf);
+    return NULL;
+
+}
+    
+
 static void cb_stackdriver_flush(const void *data, size_t bytes,
                                  const char *tag, int tag_len,
                                  struct flb_input_instance *i_ins,
@@ -1800,16 +1850,9 @@ static void cb_stackdriver_flush(const void *data, size_t bytes,
     (void) i_ins;
     (void) config;
     int ret;
-    int ret_code = FLB_RETRY;
-    size_t b_sent;
     char *token;
-    flb_sds_t payload_buf;
-    size_t payload_size;
-    void *out_buf;
-    size_t out_size;
     struct flb_stackdriver *ctx = out_context;
     struct flb_upstream_conn *u_conn;
-    struct flb_http_client *c;
 
     /* Get upstream connection */
     u_conn = flb_upstream_conn_get(ctx->u);
@@ -1826,59 +1869,43 @@ static void cb_stackdriver_flush(const void *data, size_t bytes,
     }
     flb_upstream_conn_release(u_conn);
 
-    /* Reformat msgpack to stackdriver JSON payload */
-    ret = stackdriver_format(config, i_ins,
-                             ctx, NULL,
-                             tag, tag_len,
-                             data, bytes,
+    // Convert to JSON
+    void *out_buf;
+    size_t out_size;
+    ret = stackdriver_format(ctx, tag, tag_len, data, bytes,
                              &out_buf, &out_size);
+    flb_sds_t payload_buf = (flb_sds_t) out_buf;
+    size_t payload_size = out_size;
     if (ret != 0) {
         FLB_OUTPUT_RETURN(FLB_RETRY);
     }
-
-    payload_buf = (flb_sds_t) out_buf;
-    payload_size = out_size;
-
-    CURL *curl = curl_easy_init();
-
-    if (curl == NULL){
-        flb_plg_error(ctx->ins, "cannot initialize curl");
+ 
+    // Copy token to heap
+    char* token_copy = strndup(token, 512);
+    if (token_copy == NULL){
+        flb_sds_destroy(payload_buf);
         FLB_OUTPUT_RETURN(FLB_ERROR);
     }
-    curl_easy_setopt(curl, CURLOPT_URL, FLB_STD_WRITE_URL);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Fluent-Bit");
-    curl_easy_setopt(curl, CURLOPT_POST, 1L);
- 
-    struct curl_slist *hs=NULL;
-    int len;
-    char header[512];
 
-    len = snprintf(header, sizeof(header) - 1,
-                   "Authorization: Bearer %s", token);
-    header[len] = '\0';
-    hs = curl_slist_append(hs, "Content-Type: application/json");
-    hs = curl_slist_append(hs, header);
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hs);
-    
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, payload_size);
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload_buf);
- 
-    CURLcode res = curl_easy_perform(curl);
-    curl_easy_cleanup(curl);
-
-    if (res == CURLE_OK){
-        ret_code = FLB_OK;
-    } else {
-        /* we got an error */
-        flb_plg_warn(ctx->ins, "error making http request");
-        ret_code = FLB_RETRY;
+    // Load parameters to heap
+    struct cb_stackdriver_flush_param arg = {
+        .payload_buf = payload_buf, .payload_size = payload_size, .token = token_copy
+    };
+    struct cb_stackdriver_flush_param* arg_cp = malloc(sizeof(struct cb_stackdriver_flush_param));
+    if (arg_cp == NULL){
+        flb_sds_destroy(payload_buf);
+        free(token_copy);
+        FLB_OUTPUT_RETURN(FLB_ERROR);
     }
+    *arg_cp = arg;
 
-    /* Cleanup */
-    flb_sds_destroy(payload_buf);
 
-    /* Done */
-    FLB_OUTPUT_RETURN(ret_code);
+    
+    pthread_t thread_id; 
+    pthread_create(&thread_id, NULL, &cb_stackdriver_flush_thread, arg_cp);
+    pthread_detach(thread_id);
+    
+    FLB_OUTPUT_RETURN(FLB_OK);
 }
 
 static int cb_stackdriver_exit(void *data, struct flb_config *config)
@@ -1901,7 +1928,7 @@ struct flb_output_plugin out_stackdriver_plugin = {
     .cb_exit      = cb_stackdriver_exit,
 
     /* Test */
-    .test_formatter.callback = stackdriver_format,
+    //.test_formatter.callback = stackdriver_format,
 
     /* Plugin flags */
     .flags          = FLB_OUTPUT_NET | FLB_IO_TLS,
