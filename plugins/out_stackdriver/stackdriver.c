@@ -27,6 +27,7 @@
 #include <fluent-bit/flb_regex.h>
 
 #include <msgpack.h>
+#include <curl/curl.h>
 
 #include "gce_metadata.h"
 #include "stackdriver.h"
@@ -1816,6 +1817,15 @@ static void cb_stackdriver_flush(const void *data, size_t bytes,
         FLB_OUTPUT_RETURN(FLB_RETRY);
     }
 
+    /* Get or renew Token */
+    token = get_google_token(ctx);
+    if (!token) {
+        flb_plg_error(ctx->ins, "cannot retrieve oauth2 token");
+        flb_upstream_conn_release(u_conn);
+        FLB_OUTPUT_RETURN(FLB_RETRY);
+    }
+    flb_upstream_conn_release(u_conn);
+
     /* Reformat msgpack to stackdriver JSON payload */
     ret = stackdriver_format(config, i_ins,
                              ctx, NULL,
@@ -1823,66 +1833,43 @@ static void cb_stackdriver_flush(const void *data, size_t bytes,
                              data, bytes,
                              &out_buf, &out_size);
     if (ret != 0) {
-        flb_upstream_conn_release(u_conn);
         FLB_OUTPUT_RETURN(FLB_RETRY);
     }
 
     payload_buf = (flb_sds_t) out_buf;
     payload_size = out_size;
 
-    /* Get or renew Token */
-    token = get_google_token(ctx);
-    if (!token) {
-        flb_plg_error(ctx->ins, "cannot retrieve oauth2 token");
-        flb_upstream_conn_release(u_conn);
-        flb_sds_destroy(payload_buf);
-        FLB_OUTPUT_RETURN(FLB_RETRY);
+    CURL *curl = curl_easy_init();
+
+    if (curl == NULL){
+        flb_plg_error(ctx->ins, "cannot initialize curl");
+        FLB_OUTPUT_RETURN(FLB_ERROR);
     }
+    curl_easy_setopt(curl, CURLOPT_URL, FLB_STD_WRITE_URL);
+    curl_easy_setopt(curl, CURLOPT_XOAUTH2_BEARER, token);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Fluent-Bit");
+    curl_easy_setopt(curl, CURLOPT_POST, 1L);
+ 
+    struct curl_slist *hs=NULL;
+    hs = curl_slist_append(hs, "Content-Type: application/json");
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hs);
+    
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, payload_size);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload_buf);
+ 
+    CURLcode res = curl_easy_perform(curl);
+    curl_easy_cleanup(curl);
 
-    /* Compose HTTP Client request */
-    c = flb_http_client(u_conn, FLB_HTTP_POST, FLB_STD_WRITE_URI,
-                        payload_buf, payload_size, NULL, 0, NULL, 0);
-
-    flb_http_buffer_size(c, 4192);
-
-    flb_http_add_header(c, "User-Agent", 10, "Fluent-Bit", 10);
-    flb_http_add_header(c, "Content-Type", 12, "application/json", 16);
-
-    /* Compose and append Authorization header */
-    set_authorization_header(c, token);
-
-    /* Send HTTP request */
-    ret = flb_http_do(c, &b_sent);
-
-    /* validate response */
-    if (ret != 0) {
-        flb_plg_warn(ctx->ins, "http_do=%i", ret);
+    if (res == CURLE_OK){
+        ret_code = FLB_OK;
+    } else {
+        /* we got an error */
+        flb_plg_warn(ctx->ins, "error making http request");
         ret_code = FLB_RETRY;
-    }
-    else {
-        /* The request was issued successfully, validate the 'error' field */
-        flb_plg_debug(ctx->ins, "HTTP Status=%i", c->resp.status);
-        if (c->resp.status == 200) {
-            ret_code = FLB_OK;
-        }
-        else {
-            if (c->resp.payload_size > 0) {
-                /* we got an error */
-                flb_plg_warn(ctx->ins, "error\n%s",
-                             c->resp.payload);
-            }
-            else {
-                flb_plg_debug(ctx->ins, "response\n%s",
-                              c->resp.payload);
-            }
-            ret_code = FLB_RETRY;
-        }
     }
 
     /* Cleanup */
     flb_sds_destroy(payload_buf);
-    flb_http_client_destroy(c);
-    flb_upstream_conn_release(u_conn);
 
     /* Done */
     FLB_OUTPUT_RETURN(ret_code);
