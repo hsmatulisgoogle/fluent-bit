@@ -1846,12 +1846,18 @@ static void cb_stackdriver_flush(const void *data, size_t bytes,
         FLB_OUTPUT_RETURN(FLB_ERROR);
     }
     curl_easy_setopt(curl, CURLOPT_URL, FLB_STD_WRITE_URL);
-    curl_easy_setopt(curl, CURLOPT_XOAUTH2_BEARER, token);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "Fluent-Bit");
     curl_easy_setopt(curl, CURLOPT_POST, 1L);
  
     struct curl_slist *hs=NULL;
+    int len;
+    char header[512];
+
+    len = snprintf(header, sizeof(header) - 1,
+                   "Authorization: Bearer %s", token);
+    header[len] = '\0';
     hs = curl_slist_append(hs, "Content-Type: application/json");
+    hs = curl_slist_append(hs, header);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hs);
     
     curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, payload_size);
