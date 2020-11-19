@@ -1793,6 +1793,11 @@ static void set_authorization_header(struct flb_http_client *c,
 }
 
 
+size_t dev_null_write_data(void *buffer, size_t size, size_t nmemb, void *userp)
+{
+   return size * nmemb;
+}
+
 struct cb_stackdriver_flush_param {
     flb_sds_t payload_buf;
     size_t payload_size;
@@ -1816,23 +1821,36 @@ static void* cb_stackdriver_flush_thread(void* arg){
     curl_easy_setopt(curl, CURLOPT_URL, FLB_STD_WRITE_URL);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "Fluent-Bit");
     curl_easy_setopt(curl, CURLOPT_POST, 1L);
- 
+
+    // Set additional headers
     struct curl_slist *hs=NULL;
     char header[512];
     snprintf(header, sizeof(header) - 1, "Authorization: Bearer %s", token);
     hs = curl_slist_append(hs, "Content-Type: application/json");
     hs = curl_slist_append(hs, header);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hs);
+
+    // Disable printing to stdout
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, dev_null_write_data);
     
     curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, payload_size);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload_buf);
- 
+
+    char errbuf[CURL_ERROR_SIZE]; errbuf[0] = '\0';
+    curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errbuf);    
     CURLcode res = curl_easy_perform(curl);
     curl_easy_cleanup(curl);
 
     if (res != CURLE_OK){
-        /* we got an error */        
-        fprintf(stderr, "error making curl request\n");
+        /* we got an error */
+        size_t len = strlen(errbuf);
+        fprintf(stderr, "\nlibcurl: (%d) ", res);
+        if(len) {
+            fprintf(stderr, "%s%s", errbuf,
+                    ((errbuf[len - 1] != '\n') ? "\n" : ""));
+        } else {
+            fprintf(stderr, "%s\n", curl_easy_strerror(res));
+        }
     }
     /* Cleanup */
     flb_sds_destroy(payload_buf);
@@ -1854,20 +1872,12 @@ static void cb_stackdriver_flush(const void *data, size_t bytes,
     struct flb_stackdriver *ctx = out_context;
     struct flb_upstream_conn *u_conn;
 
-    /* Get upstream connection */
-    u_conn = flb_upstream_conn_get(ctx->u);
-    if (!u_conn) {
-        FLB_OUTPUT_RETURN(FLB_RETRY);
-    }
-
     /* Get or renew Token */
     token = get_google_token(ctx);
     if (!token) {
         flb_plg_error(ctx->ins, "cannot retrieve oauth2 token");
-        flb_upstream_conn_release(u_conn);
         FLB_OUTPUT_RETURN(FLB_RETRY);
     }
-    flb_upstream_conn_release(u_conn);
 
     // Convert to JSON
     void *out_buf;
