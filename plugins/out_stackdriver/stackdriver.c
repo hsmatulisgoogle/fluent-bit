@@ -1824,10 +1824,23 @@ static void* cb_stackdriver_flush_thread(void* arg){
 
     // Set additional headers
     struct curl_slist *hs=NULL;
+    struct curl_slist *tmp=NULL;
     char header[512];
     snprintf(header, sizeof(header) - 1, "Authorization: Bearer %s", token);
     hs = curl_slist_append(hs, "Content-Type: application/json");
-    hs = curl_slist_append(hs, header);
+    if (hs == NULL){
+        // Error
+        return NULL;
+    }
+    tmp = curl_slist_append(hs, header);
+    if (tmp == NULL){
+        // Error
+        curl_slist_free_all(hs);
+        return NULL;
+    }
+    hs = tmp;
+
+    
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hs);
 
     // Disable printing to stdout
@@ -1839,7 +1852,6 @@ static void* cb_stackdriver_flush_thread(void* arg){
     char errbuf[CURL_ERROR_SIZE]; errbuf[0] = '\0';
     curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errbuf);    
     CURLcode res = curl_easy_perform(curl);
-    curl_easy_cleanup(curl);
 
     if (res != CURLE_OK){
         /* we got an error */
@@ -1853,6 +1865,9 @@ static void* cb_stackdriver_flush_thread(void* arg){
         }
     }
     /* Cleanup */
+    curl_slist_free_all(hs);
+    curl_easy_cleanup(curl);
+    free(token);
     flb_sds_destroy(payload_buf);
     return NULL;
 
