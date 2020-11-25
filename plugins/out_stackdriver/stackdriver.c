@@ -1254,7 +1254,7 @@ static int pack_json_payload(int insert_id_extracted,
 static int stackdriver_format(struct flb_stackdriver *ctx,
                               const char *tag, int tag_len,
                               const void *data, size_t bytes,
-                              void **out_data, size_t *out_size)
+                              msgpack_sbuffer *out_data)
 {
     int len;
     int ret;
@@ -1333,7 +1333,6 @@ static int stackdriver_format(struct flb_stackdriver *ctx,
     msgpack_unpacked_destroy(&result);
 
     if (array_size == 0) {
-        *out_size = 0;
         return -1;
     }
 
@@ -1764,19 +1763,9 @@ static int stackdriver_format(struct flb_stackdriver *ctx,
         msgpack_pack_str_body(&mp_pck, time_formatted, s);
 
     }
+    msgpack_unpacked_destroy(&result);
 
-    /* Convert from msgpack to JSON */
-    out_buf = flb_msgpack_raw_to_json_sds(mp_sbuf.data, mp_sbuf.size);
-    msgpack_sbuffer_destroy(&mp_sbuf);
-
-    if (!out_buf) {
-        flb_plg_error(ctx->ins, "error formatting JSON payload");
-        msgpack_unpacked_destroy(&result);
-        return -1;
-    }
-
-    *out_data = out_buf;
-    *out_size = flb_sds_len(out_buf);
+    *out_data = mp_sbuf;
 
     return 0;
 }
@@ -1799,23 +1788,36 @@ size_t dev_null_write_data(void *buffer, size_t size, size_t nmemb, void *userp)
 }
 
 struct cb_stackdriver_flush_param {
-    flb_sds_t payload_buf;
-    size_t payload_size;
     char* token;
+    msgpack_sbuffer mp_payload;
 };
 
 static void* cb_stackdriver_flush_thread(void* arg){
-    // Load arguments from pointer
+    /*Load arguments from pointer */
     struct cb_stackdriver_flush_param* flush_arg = (struct cb_stackdriver_flush_param*) arg;
-    const flb_sds_t payload_buf = flush_arg->payload_buf;
-    size_t payload_size = flush_arg->payload_size;
     char* token = flush_arg->token;
+    msgpack_sbuffer mp_payload = flush_arg->mp_payload;
     free(flush_arg);
 
+    /* Convert from msgpack to JSON */
+    flb_sds_t payload_buf = flb_msgpack_raw_to_json_sds(mp_payload.data, mp_payload.size);
+    msgpack_sbuffer_destroy(&mp_payload);
+
+    if (!payload_buf) {
+        fprintf(stderr, "error formatting JSON payload\n");
+        free(token);
+        return -1;
+    }
+    size_t payload_size = flb_sds_len(payload_buf);
+
+
+    /* Send data to logging api via HTTP post request */
     CURL *curl = curl_easy_init();
 
     if (curl == NULL){
         fprintf(stderr, "cannot initialize curl\n");
+        flb_sds_destroy(payload_buf);
+        free(token);
         return NULL;
     }
     curl_easy_setopt(curl, CURLOPT_URL, FLB_STD_WRITE_URL);
@@ -1830,11 +1832,17 @@ static void* cb_stackdriver_flush_thread(void* arg){
     hs = curl_slist_append(hs, "Content-Type: application/json");
     if (hs == NULL){
         // Error
+        flb_sds_destroy(payload_buf);
+        free(token);
+        curl_easy_cleanup(curl);
         return NULL;
     }
     tmp = curl_slist_append(hs, header);
     if (tmp == NULL){
         // Error
+        flb_sds_destroy(payload_buf);
+        free(token);
+        curl_easy_cleanup(curl);
         curl_slist_free_all(hs);
         return NULL;
     }
@@ -1894,32 +1902,30 @@ static void cb_stackdriver_flush(const void *data, size_t bytes,
         FLB_OUTPUT_RETURN(FLB_RETRY);
     }
 
-    // Convert to JSON
-    void *out_buf;
-    size_t out_size;
-    ret = stackdriver_format(ctx, tag, tag_len, data, bytes,
-                             &out_buf, &out_size);
-    flb_sds_t payload_buf = (flb_sds_t) out_buf;
-    size_t payload_size = out_size;
+    // Convert to JSON msgpack
+    msgpack_sbuffer mp_payload;
+    ret = stackdriver_format(ctx, tag, tag_len, data, bytes, &mp_payload);
+    
     if (ret != 0) {
+        msgpack_sbuffer_destroy(&mp_payload);
         FLB_OUTPUT_RETURN(FLB_RETRY);
     }
  
     // Copy token to heap
     char* token_copy = strndup(token, 512);
     if (token_copy == NULL){
-        flb_sds_destroy(payload_buf);
+        msgpack_sbuffer_destroy(&mp_payload);
         FLB_OUTPUT_RETURN(FLB_ERROR);
     }
 
     // Load parameters to heap
     struct cb_stackdriver_flush_param arg = {
-        .payload_buf = payload_buf, .payload_size = payload_size, .token = token_copy
+        .mp_payload = mp_payload, .token = token_copy
     };
     struct cb_stackdriver_flush_param* arg_cp = malloc(sizeof(struct cb_stackdriver_flush_param));
     if (arg_cp == NULL){
-        flb_sds_destroy(payload_buf);
         free(token_copy);
+        msgpack_sbuffer_destroy(&mp_payload);
         FLB_OUTPUT_RETURN(FLB_ERROR);
     }
     *arg_cp = arg;
