@@ -849,7 +849,7 @@ static pthread_mutex_t lockarray[] = {
     PTHREAD_MUTEX_INITIALIZER,
     PTHREAD_MUTEX_INITIALIZER
 };
-static_assert(sizeof(lockarray)/sizeof(*lockarray) == CURL_LOCK_DATA_LAST, "lock array is the wrong size");
+static_assert(sizeof(lockarray)/sizeof(*lockarray) >= CURL_LOCK_DATA_LAST, "lock array is too small");
 
 static void lock_cb(CURL *handle, curl_lock_data data,
                     curl_lock_access access, void *userptr)
