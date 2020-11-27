@@ -849,7 +849,7 @@ static pthread_mutex_t lockarray[] = {
     PTHREAD_MUTEX_INITIALIZER,
     PTHREAD_MUTEX_INITIALIZER
 };
-static_assert(sizeof(lockarray)/sizeof(*lockarray) == CURL_LOCK_DATA_LAST);
+static_assert(sizeof(lockarray)/sizeof(*lockarray) == CURL_LOCK_DATA_LAST, "lock array is the wrong size");
 
 static void lock_cb(CURL *handle, curl_lock_data data,
                     curl_lock_access access, void *userptr)
@@ -906,7 +906,6 @@ static int cb_stackdriver_init(struct flb_output_instance *ins,
     curl_share_setopt(ctx->curl_shared, CURLSHOPT_LOCKFUNC, lock_cb);
     curl_share_setopt(ctx->curl_shared, CURLSHOPT_UNLOCKFUNC, unlock_cb);
     curl_share_setopt(ctx->curl_shared, CURLSHOPT_SHARE, CURL_LOCK_DATA_DNS);
-    curl_share_setopt(ctx->curl_shared, CURLSHOPT_SHARE, CURL_LOCK_DATA_PSL);
     curl_share_setopt(ctx->curl_shared, CURLSHOPT_SHARE, CURL_LOCK_DATA_SSL_SESSION);
     
     /* Create Upstream context for Stackdriver Logging (no oauth2 service) */
@@ -1850,7 +1849,7 @@ static void* cb_stackdriver_flush_thread(void* arg){
     if (!payload_buf) {
         fprintf(stderr, "error formatting JSON payload\n");
         free(token);
-        return -1;
+        return NULL;
     }
     size_t payload_size = flb_sds_len(payload_buf);
 
@@ -1938,7 +1937,6 @@ static void cb_stackdriver_flush(const void *data, size_t bytes,
     int ret;
     char *token;
     struct flb_stackdriver *ctx = out_context;
-    struct flb_upstream_conn *u_conn;
 
     /* Get or renew Token */
     token = get_google_token(ctx);
