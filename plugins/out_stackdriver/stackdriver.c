@@ -30,6 +30,7 @@
 
 #include <curl/curl.h>
 
+#include <assert.h>
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
@@ -838,6 +839,36 @@ int extract_resource_labels_from_regex(struct flb_stackdriver *ctx,
     return ret;
 }
 
+
+static pthread_mutex_t lockarray[] = {
+    PTHREAD_MUTEX_INITIALIZER,
+    PTHREAD_MUTEX_INITIALIZER,
+    PTHREAD_MUTEX_INITIALIZER,
+    PTHREAD_MUTEX_INITIALIZER,
+    PTHREAD_MUTEX_INITIALIZER,
+    PTHREAD_MUTEX_INITIALIZER,
+    PTHREAD_MUTEX_INITIALIZER
+};
+static_assert(sizeof(lockarray)/sizeof(*lockarray) == CURL_LOCK_DATA_LAST);
+
+static void lock_cb(CURL *handle, curl_lock_data data,
+                    curl_lock_access access, void *userptr)
+{
+  (void)access;
+  (void)userptr;
+  (void)handle;
+  pthread_mutex_lock(&lockarray[data]);
+}
+
+static void unlock_cb(CURL *handle, curl_lock_data data,
+                      void *userptr)
+{
+  (void)userptr;
+  (void)handle;
+  pthread_mutex_unlock(&lockarray[data]);
+}
+
+
 static int cb_stackdriver_init(struct flb_output_instance *ins,
                           struct flb_config *config, void *data)
 {
@@ -861,15 +892,26 @@ static int cb_stackdriver_init(struct flb_output_instance *ins,
         io_flags |= FLB_IO_IPV6;
     }
 
-    /* Create Upstream context for Stackdriver Logging (no oauth2 service) */
-    ctx->u = flb_upstream_create_url(config, FLB_STD_WRITE_URL,
-                                     io_flags, &ins->tls);
-    ctx->metadata_u = flb_upstream_create_url(config, "http://metadata.google.internal",
-                                     FLB_IO_TCP, NULL);
-    if (!ctx->u) {
-        flb_plg_error(ctx->ins, "upstream creation failed");
+    /* Create shared libcurl object. NOTE: This can't be freed on cb_exit right now
+     * as there is no thread synchornization. There could be a detached thread using it.
+     */
+    // Note init is not guarenteed to run only once, so global_init is discoraged.
+    // For this reason, we need to statically allocate the mutexes.
+    curl_global_init(CURL_GLOBAL_ALL);
+    ctx->curl_shared = curl_share_init();
+    if (ctx->curl_shared == NULL){
+        flb_plg_error(ctx->ins, "couldn't create shared curl object");
         return -1;
     }
+    curl_share_setopt(ctx->curl_shared, CURLSHOPT_LOCKFUNC, lock_cb);
+    curl_share_setopt(ctx->curl_shared, CURLSHOPT_UNLOCKFUNC, unlock_cb);
+    curl_share_setopt(ctx->curl_shared, CURLSHOPT_SHARE, CURL_LOCK_DATA_DNS);
+    curl_share_setopt(ctx->curl_shared, CURLSHOPT_SHARE, CURL_LOCK_DATA_PSL);
+    curl_share_setopt(ctx->curl_shared, CURLSHOPT_SHARE, CURL_LOCK_DATA_SSL_SESSION);
+    
+    /* Create Upstream context for Stackdriver Logging (no oauth2 service) */
+    ctx->metadata_u = flb_upstream_create_url(config, "http://metadata.google.internal",
+                                     FLB_IO_TCP, NULL);
     if (!ctx->metadata_u) {
         flb_plg_error(ctx->ins, "metadata upstream creation failed");
         return -1;
@@ -1790,6 +1832,7 @@ size_t dev_null_write_data(void *buffer, size_t size, size_t nmemb, void *userp)
 struct cb_stackdriver_flush_param {
     char* token;
     msgpack_sbuffer mp_payload;
+    CURLSH *share;
 };
 
 static void* cb_stackdriver_flush_thread(void* arg){
@@ -1797,6 +1840,7 @@ static void* cb_stackdriver_flush_thread(void* arg){
     struct cb_stackdriver_flush_param* flush_arg = (struct cb_stackdriver_flush_param*) arg;
     char* token = flush_arg->token;
     msgpack_sbuffer mp_payload = flush_arg->mp_payload;
+    CURLSH *share = flush_arg->share;
     free(flush_arg);
 
     /* Convert from msgpack to JSON */
@@ -1823,6 +1867,7 @@ static void* cb_stackdriver_flush_thread(void* arg){
     curl_easy_setopt(curl, CURLOPT_URL, FLB_STD_WRITE_URL);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "Fluent-Bit");
     curl_easy_setopt(curl, CURLOPT_POST, 1L);
+    curl_easy_setopt(curl, CURLOPT_SHARE, share);
 
     // Set additional headers
     struct curl_slist *hs=NULL;
@@ -1920,7 +1965,7 @@ static void cb_stackdriver_flush(const void *data, size_t bytes,
 
     // Load parameters to heap
     struct cb_stackdriver_flush_param arg = {
-        .mp_payload = mp_payload, .token = token_copy
+        .mp_payload = mp_payload, .token = token_copy, .share = ctx->curl_shared,
     };
     struct cb_stackdriver_flush_param* arg_cp = malloc(sizeof(struct cb_stackdriver_flush_param));
     if (arg_cp == NULL){

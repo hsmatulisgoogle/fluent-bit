@@ -21,6 +21,8 @@
 #ifndef FLB_OUT_STACKDRIVER_H
 #define FLB_OUT_STACKDRIVER_H
 
+#include <curl/curl.h>
+
 #include <fluent-bit/flb_info.h>
 #include <fluent-bit/flb_output.h>
 #include <fluent-bit/flb_oauth2.h>
@@ -112,8 +114,8 @@ struct flb_stackdriver {
     /* oauth2 context */
     struct flb_oauth2 *o;
 
-    /* upstream context for stackdriver write end-point */
-    struct flb_upstream *u;
+    /* Shared libcurl object */
+    CURLSH* curl_shared;
 
     /* upstream context for metadata end-point */
     struct flb_upstream *metadata_u;

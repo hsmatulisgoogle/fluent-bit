@@ -360,9 +360,6 @@ int flb_stackdriver_conf_destroy(struct flb_stackdriver *ctx)
         flb_upstream_destroy(ctx->metadata_u);
     }
 
-    if (ctx->u) {
-        flb_upstream_destroy(ctx->u);
-    }
     flb_free(ctx);
 
     return 0;
