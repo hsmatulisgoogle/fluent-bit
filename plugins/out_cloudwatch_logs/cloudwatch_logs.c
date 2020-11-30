@@ -128,6 +128,11 @@ static int cb_cloudwatch_init(struct flb_output_instance *ins,
         ctx->log_key = tmp;
     }
 
+    tmp = flb_output_get_property("extra_user_agent", ins);
+    if (tmp) {
+        ctx->extra_user_agent = tmp;
+    }
+    
     tmp = flb_output_get_property("region", ins);
     if (tmp) {
         ctx->region = tmp;
@@ -155,6 +160,12 @@ static int cb_cloudwatch_init(struct flb_output_instance *ins,
     /* native plugins use On/Off as bool, the old Go plugin used true/false */
     if (tmp && (strcasecmp(tmp, "On") == 0 || strcasecmp(tmp, "true") == 0)) {
         ctx->create_group = FLB_TRUE;
+    }
+
+    ctx->log_retention_days = 0;
+    tmp = flb_output_get_property("log_retention_days", ins);
+    if (tmp) {
+        ctx->log_retention_days = atoi(tmp);
     }
 
     tmp = flb_output_get_property("role_arn", ins);
@@ -289,6 +300,7 @@ static int cb_cloudwatch_init(struct flb_output_instance *ins,
     ctx->cw_client->proxy = NULL;
     ctx->cw_client->static_headers = &content_type_header;
     ctx->cw_client->static_headers_len = 1;
+    ctx->cw_client->extra_user_agent = (char *) ctx->extra_user_agent;
 
     struct flb_upstream *upstream = flb_upstream_create(config, ctx->endpoint,
                                                         443, FLB_IO_TLS,
@@ -306,6 +318,7 @@ static int cb_cloudwatch_init(struct flb_output_instance *ins,
     upstream->flags &= ~(FLB_IO_ASYNC);
 
     ctx->cw_client->upstream = upstream;
+    flb_output_upstream_set(upstream, ctx->ins);
     ctx->cw_client->host = ctx->endpoint;
 
     /* alloc the payload/processing buffer */
@@ -508,6 +521,15 @@ static struct flb_config_map config_map[] = {
     },
 
     {
+     FLB_CONFIG_MAP_STR, "extra_user_agent", NULL,
+     0, FLB_FALSE, 0,
+     "This option appends a string to the default user agent. "
+     "AWS asks that you not manually set this field yourself, "
+     "it is reserved for use in our vended configurations, "
+     "for example, EKS Container Insights."
+    },
+
+    {
      FLB_CONFIG_MAP_STR, "log_format", NULL,
      0, FLB_FALSE, 0,
      "An optional parameter that can be used to tell CloudWatch the format "
@@ -526,6 +548,14 @@ static struct flb_config_map config_map[] = {
      0, FLB_FALSE, 0,
      "Automatically create the log group (log streams will always automatically"
      " be created)"
+    },
+
+    {
+     FLB_CONFIG_MAP_INT, "log_retention_days", "0",
+     0, FLB_FALSE, 0,
+     "If set to a number greater than zero, and newly create log group's "
+     "retention policy is set to this many days. "
+     "Valid values are: [1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653]"
     },
 
     {

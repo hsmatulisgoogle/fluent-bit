@@ -117,9 +117,13 @@ struct flb_cloudwatch {
     const char *log_format;
     const char *role_arn;
     const char *log_key;
+    const char *extra_user_agent;
     int custom_endpoint;
     /* Should the plugin create the log group */
     int create_group;
+
+    /* If set to a number greater than zero, and newly create log group's retention policy is set to this many days. */
+    int log_retention_days;
 
     /* has the log group successfully been created */
     int group_created;
