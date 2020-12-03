@@ -16,7 +16,9 @@ extern "C" int flush_data(int potato){
     boost::asio::io_service io_service;
     // Get a list of endpoints corresponding to the server name.
     tcp::resolver resolver(io_service);
-    tcp::resolver::query query("www.google.com", "https");
+    std::string website = "pantheon.corp.google.com";
+    std::string resource = "/";
+    tcp::resolver::query query(website, "https");
     tcp::resolver::iterator endpoint_iterator = resolver.resolve(query);
 
     // Try each endpoint until we successfully establish a connection.
@@ -31,8 +33,8 @@ extern "C" int flush_data(int potato){
     // allow us to treat all data up until the EOF as the content.
     boost::asio::streambuf request;
     std::ostream request_stream(&request);
-    request_stream << "GET " << "/" << " HTTP/1.0\r\n";
-    request_stream << "Host: " << "fluent-bit" << "\r\n";
+    request_stream << "GET "<< resource <<" HTTP/1.0\r\n";
+    request_stream << "Host: " << website << "\r\n";
     request_stream << "Accept: */*\r\n";
     request_stream << "Connection: close\r\n\r\n";
 
