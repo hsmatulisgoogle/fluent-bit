@@ -29,6 +29,11 @@
 #include <fluent-bit/flb_metrics.h>
 #include <msgpack.h>
 
+#include <pthread.h>
+
+
+static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+
 static int id_exists(int id, struct flb_metrics *metrics)
 {
     struct mk_list *head;
@@ -116,6 +121,7 @@ int flb_metrics_add(int id, const char *title, struct flb_metrics *metrics)
 {
     int ret;
     struct flb_metric *m;
+    pthread_mutex_lock(&mutex);
 
     /* Create context */
     m = flb_malloc(sizeof(struct flb_metric));
@@ -153,12 +159,15 @@ int flb_metrics_add(int id, const char *title, struct flb_metrics *metrics)
     m->id = id;
     metrics->count++;
 
+    pthread_mutex_unlock(&mutex);
+
     return id;
 }
 
 int flb_metrics_sum(int id, size_t val, struct flb_metrics *metrics)
 {
     struct flb_metric *m;
+    pthread_mutex_lock(&mutex);
 
     m = flb_metrics_get_id(id, metrics);
     if (!m) {
@@ -166,6 +175,7 @@ int flb_metrics_sum(int id, size_t val, struct flb_metrics *metrics)
     }
 
     m->val += val;
+    pthread_mutex_unlock(&mutex);
     return 0;
 }
 
@@ -175,6 +185,7 @@ int flb_metrics_destroy(struct flb_metrics *metrics)
     struct mk_list *tmp;
     struct mk_list *head;
     struct flb_metric *m;
+    pthread_mutex_lock(&mutex);
 
     mk_list_foreach_safe(head, tmp, &metrics->list) {
         m = mk_list_entry(head, struct flb_metric, _head);
@@ -184,6 +195,7 @@ int flb_metrics_destroy(struct flb_metrics *metrics)
     }
 
     flb_free(metrics);
+    pthread_mutex_unlock(&mutex);
     return count;
 }
 
@@ -191,6 +203,7 @@ int flb_metrics_print(struct flb_metrics *metrics)
 {
     struct mk_list *head;
     struct flb_metric *m;
+    pthread_mutex_lock(&mutex);
 
     printf("[metric dump] title => '%s'", metrics->title);
 
@@ -199,7 +212,8 @@ int flb_metrics_print(struct flb_metrics *metrics)
         printf(", '%s' => %lu", m->title, m->val);
     }
     printf("\n");
-
+    pthread_mutex_unlock(&mutex);
+    
     return 0;
 }
 
@@ -211,6 +225,8 @@ int flb_metrics_dump_values(char **out_buf, size_t *out_size,
     struct flb_metric *m;
     msgpack_sbuffer mp_sbuf;
     msgpack_packer mp_pck;
+
+    pthread_mutex_lock(&mutex);
 
     /* Prepare new outgoing buffer */
     msgpack_sbuffer_init(&mp_sbuf);
@@ -227,6 +243,8 @@ int flb_metrics_dump_values(char **out_buf, size_t *out_size,
 
     *out_buf  = mp_sbuf.data;
     *out_size = mp_sbuf.size;
+
+    pthread_mutex_unlock(&mutex);
 
     return 0;
 }
