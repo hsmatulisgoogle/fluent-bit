@@ -36,6 +36,8 @@
 #include "stackdriver_http_request.h"
 #include "stackdriver_timestamp.h"
 #include "stackdriver_helper.h"
+#include "stackdriver_flush.h"
+
 #include <mbedtls/base64.h>
 #include <mbedtls/sha256.h>
 
@@ -854,6 +856,9 @@ static int cb_stackdriver_init(struct flb_output_instance *ins,
     if (ins->host.ipv6 == FLB_TRUE) {
         io_flags |= FLB_IO_IPV6;
     }
+
+    int res = flush_data(2);
+    printf("C++ returned: %d\n", res);
 
     /* Create Upstream context for Stackdriver Logging (no oauth2 service) */
     ctx->u = flb_upstream_create_url(config, FLB_STD_WRITE_URL,
