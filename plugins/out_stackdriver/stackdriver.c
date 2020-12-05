@@ -857,9 +857,12 @@ static int cb_stackdriver_init(struct flb_output_instance *ins,
         io_flags |= FLB_IO_IPV6;
     }
 
-    int res = flush_data(2);
-    printf("C++ returned: %d\n", res);
-
+    printf("Before!\n");
+    StackdriverFlushContext* fctx = stackdriver_cpp_init(2);
+    stackdriver_cpp_flush(fctx);
+    printf("After!\n");
+    return 0;
+        
     /* Create Upstream context for Stackdriver Logging (no oauth2 service) */
     ctx->u = flb_upstream_create_url(config, FLB_STD_WRITE_URL,
                                      io_flags, &ins->tls);
@@ -1891,6 +1894,7 @@ static void cb_stackdriver_flush(const void *data, size_t bytes,
     struct flb_stackdriver *ctx = out_context;
     struct flb_upstream_conn *u_conn;
     struct flb_http_client *c;
+    FLB_OUTPUT_RETURN(FLB_RETRY);
 
     /* Get upstream connection */
     u_conn = flb_upstream_conn_get(ctx->u);

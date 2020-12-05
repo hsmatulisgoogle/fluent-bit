@@ -3,14 +3,48 @@
 
 #include <string>
 #include <iostream>
-#include <boost/asio.hpp>
-#include <openssl/ssl.h>
+#include <thread>
+#include <vector>
+
+#include <boost/asio/bind_executor.hpp>
+#include <boost/asio/connect.hpp>
+#include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/post.hpp>
+#include <boost/asio/strand.hpp>
 #include <boost/asio/ssl.hpp>
 
 
 using boost::asio::ip::tcp;
 
-extern "C" int flush_data(int potato){
+
+extern "C" StackdriverFlushContext* stackdriver_cpp_init(int num_threads) {
+
+  StackdriverFlushContext* ctx =  new StackdriverFlushContext();
+  ctx->workers.reserve(num_threads);
+  for(int i = 0; i < num_threads; ++i)
+  {
+    ctx->workers.emplace_back(
+        [ctx] {
+          // Stops the asio event loop from running out of work
+          boost::asio::executor_work_guard<boost::asio::io_context::executor_type>
+              work_guard = boost::asio::make_work_guard(ctx->ioc);
+
+          ctx->ioc.run();
+        });
+  }
+
+  return ctx;
+}
+
+extern "C" int stackdriver_cpp_flush(StackdriverFlushContext* ctx) {
+  boost::asio::post(ctx->ioc, [](){
+      std::cout<<"I am in a post call!!\n\n\n"<<std::endl;
+    });
+  return 0;
+
+}
+
+extern "C" int flush_data(){
     try {
 
     boost::asio::io_service io_service;
@@ -92,5 +126,5 @@ extern "C" int flush_data(int potato){
     std::cout << "Exception: " << e.what() << "\n";
   }
 
-  return potato + 2;
+  return 123;
 }
