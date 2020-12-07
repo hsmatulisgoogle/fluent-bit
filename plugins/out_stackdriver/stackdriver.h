@@ -37,8 +37,8 @@
 
 /* Stackdriver Logging 'write' end-point */
 #define FLB_STD_WRITE_URI "/v2/entries:write"
-#define FLB_STD_WRITE_URL \
-    "https://logging.googleapis.com" FLB_STD_WRITE_URI
+#define FLB_STD_WRITE_DOMAIN "logging.googleapis.com"
+#define FLB_STD_WRITE_URL ("https://" FLB_STD_WRITE_DOMAIN FLB_STD_WRITE_URI)
 
 /* Timestamp format */
 #define FLB_STD_TIME_FMT  "%Y-%m-%dT%H:%M:%S"
@@ -117,9 +117,6 @@ struct flb_stackdriver {
 
     /* oauth2 context */
     struct flb_oauth2 *o;
-
-    /* upstream context for stackdriver write end-point */
-    struct flb_upstream *u;
 
     /* upstream context for metadata end-point */
     struct flb_upstream *metadata_u;

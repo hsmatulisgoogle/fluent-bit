@@ -21,8 +21,8 @@ typedef struct StackdriverFlushContext StackdriverFlushContext;
 
 #include "stackdriver.h"
 StackdriverFlushContext* stackdriver_cpp_init(int num_threads);
-int stackdriver_cpp_flush(struct flb_stackdriver * plg_ctx, struct flb_thread* calling_thread, const char* data, size_t data_len, const char* tag, int tag_len);
-int stackdriver_cpp_stop(struct flb_stackdriver * plg_ctx, StackdriverFlushContext* flush_ctx);
+void stackdriver_cpp_flush(struct flb_stackdriver * plg_ctx, struct flb_thread* calling_thread, const char* data, size_t data_len, const char* tag, int tag_len);
+void stackdriver_cpp_destroy(struct flb_stackdriver * plg_ctx);
 
 
 #ifdef __cplusplus

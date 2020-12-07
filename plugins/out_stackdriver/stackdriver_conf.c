@@ -31,6 +31,7 @@
 
 #include "stackdriver.h"
 #include "stackdriver_conf.h"
+#include "stackdriver_flush.h"
 
 static inline int key_cmp(const char *str, int len, const char *cmp) {
 
@@ -351,6 +352,10 @@ int flb_stackdriver_conf_destroy(struct flb_stackdriver *ctx)
         return -1;
     }
 
+    if (ctx->flush_ctx) {
+        stackdriver_cpp_destroy(ctx);
+    }
+
     if (ctx->k8s_resource_type){
         flb_sds_destroy(ctx->namespace_name);
         flb_sds_destroy(ctx->pod_name);
@@ -390,9 +395,7 @@ int flb_stackdriver_conf_destroy(struct flb_stackdriver *ctx)
         flb_upstream_destroy(ctx->metadata_u);
     }
 
-    if (ctx->u) {
-        flb_upstream_destroy(ctx->u);
-    }
+
     flb_free(ctx);
 
     return 0;

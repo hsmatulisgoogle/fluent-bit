@@ -857,20 +857,9 @@ static int cb_stackdriver_init(struct flb_output_instance *ins,
         io_flags |= FLB_IO_IPV6;
     }
 
-    printf("Before!\n");
-    StackdriverFlushContext* fctx = stackdriver_cpp_init(2);
-    printf("After!\n");
-    return 0;
-        
-    /* Create Upstream context for Stackdriver Logging (no oauth2 service) */
-    ctx->u = flb_upstream_create_url(config, FLB_STD_WRITE_URL,
-                                     io_flags, &ins->tls);
+    ctx->flush_ctx = stackdriver_cpp_init(2);
     ctx->metadata_u = flb_upstream_create_url(config, "http://metadata.google.internal",
-                                     FLB_IO_TCP, NULL);
-    if (!ctx->u) {
-        flb_plg_error(ctx->ins, "upstream creation failed");
-        return -1;
-    }
+                                              FLB_IO_TCP, NULL);
     if (!ctx->metadata_u) {
         flb_plg_error(ctx->ins, "metadata upstream creation failed");
         return -1;

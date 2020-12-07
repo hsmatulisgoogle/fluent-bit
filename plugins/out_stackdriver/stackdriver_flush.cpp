@@ -1,6 +1,9 @@
 #define BOOST_NETWORK_ENABLE_HTTPS
 extern "C" {
 #include "stackdriver.h"
+#include <fluent-bit/flb_output.h>
+#include <fluent-bit/flb_output_plugin.h>
+#include <fluent-bit/flb_thread.h>
 }
 #include "stackdriver_flush.h"
 
@@ -16,13 +19,16 @@ extern "C" {
 #include <boost/asio/post.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/asio/ssl.hpp>
+
 #include <boost/bind.hpp>
 
-#include <fluent-bit/flb_output.h>
-#include <fluent-bit/flb_output_plugin.h>
-#include <fluent-bit/flb_thread.h>
+#include <boost/beast/core.hpp>
+#include <boost/beast/http.hpp>
+#include <boost/beast/version.hpp>
 
 
+namespace beast = boost::beast;
+namespace http = beast::http;
 using boost::asio::ip::tcp;
 
 extern "C" char *get_google_token(struct flb_stackdriver *ctx);
@@ -60,118 +66,73 @@ void cpp_internal_flush(struct flb_stackdriver* plg_ctx, struct flb_thread* call
 
   /* Get the authorization token */
   std::unique_lock<std::mutex> lock(ctx->mutex);
-  char* token = get_google_token(plg_ctx);
-  if (!token) {
+  char* c_token = get_google_token(plg_ctx);
+  if (!c_token) {
     // flb_plg_.. ids are macros, not funcitons.
     flb_plg_error(plg_ctx->ins, "cannot retrieve oauth2 token");
     flb_output_return(FLB_RETRY, calling_thread);
     return;
   }
+  std::string token = c_token;
+  lock.release();
 
   flb_sds_t payload_buf = NULL;
   size_t payload_size = 0;
   /* Reformat msgpack to stackdriver JSON payload */
-  /*
   int ret = stackdriver_format(plg_ctx, tag, tag_len,
-                              data, data_len,
-                              &payload_buf, &payload_size);
+                               data, data_len,
+                               &payload_buf, &payload_size);
   if (ret != 0) {
     flb_plg_error(plg_ctx->ins, "cannot format payload JSON");
     flb_output_return(FLB_RETRY, calling_thread);
     return;
-    } */
+  }
+
+  try {
+  // look up endpoint
+  tcp::resolver resolver(ctx->ioc);
+  tcp::resolver::query query(FLB_STD_WRITE_DOMAIN, "https");
+  tcp::resolver::iterator endpoint_iterator = resolver.resolve(query);
+
+  // handshake
+  boost::asio::ssl::context ssl_ctx(boost::asio::ssl::context::method::sslv23_client);
+  boost::asio::ssl::stream<tcp::socket> stream(ctx->ioc, ssl_ctx);
+  boost::asio::connect(stream.lowest_layer(), endpoint_iterator);
+  stream.handshake(boost::asio::ssl::stream_base::handshake_type::client);
+
+  // HTTP request
+  http::request<http::string_body> req{http::verb::post, FLB_STD_WRITE_URI, 11};
+  req.set(http::field::host, FLB_STD_WRITE_DOMAIN);
+  req.set(http::field::user_agent, "Fluent-Bit");
+  req.set(http::field::content_type, "application/json");
+  req.set(http::field::authorization, token);
+  req.set(http::field::content_length, payload_size);
+  req.set(http::field::body, payload_buf);
+  http::write(stream, req);
+
+  // Receive the HTTP response
+  beast::flat_buffer buffer;
+  http::response<http::dynamic_body> res;
+  http::read(stream, buffer, res);
+
+  // Write the message to standard out
+  std::cout << res << std::endl;
+  } catch (std::exception& e) {
+    flb_plg_error(plg_ctx->ins, "https request failed: ", e.what());
+    flb_output_return(FLB_RETRY, calling_thread);
+  }
+  flb_sds_destroy(payload_buf);
 
 }
 
 
-extern "C" int stackdriver_cpp_flush(struct flb_stackdriver * plg_ctx, struct flb_thread* calling_thread, const char* data, size_t data_len, const char* tag, int tag_len) {
+extern "C" void stackdriver_cpp_flush(struct flb_stackdriver * plg_ctx, struct flb_thread* calling_thread, const char* data, size_t data_len, const char* tag, int tag_len) {
   StackdriverFlushContext* ctx = plg_ctx->flush_ctx;
   boost::asio::post(ctx->ioc, boost::bind(cpp_internal_flush, plg_ctx, calling_thread, data, data_len, tag, tag_len));
-  return 0;
-
+  flb_thread_yield(calling_thread, FLB_FALSE);
 }
 
-extern "C" int flush_data(){
-    try {
+extern "C" void stackdriver_cpp_destroy(struct flb_stackdriver * plg_ctx) {
+  // Just leak for now
 
-    boost::asio::io_service io_service;
-    // Get a list of endpoints corresponding to the server name.
-    tcp::resolver resolver(io_service);
-    std::string website = "pantheon.corp.google.com";
-    std::string resource = "/";
-    tcp::resolver::query query(website, "https");
-    tcp::resolver::iterator endpoint_iterator = resolver.resolve(query);
-
-    // Try each endpoint until we successfully establish a connection.
-    boost::asio::ssl::context ssl_ctx(boost::asio::ssl::context::method::sslv23_client);
-
-    boost::asio::ssl::stream<tcp::socket> socket(io_service, ssl_ctx);
-    boost::asio::connect(socket.lowest_layer(), endpoint_iterator);
-    socket.handshake(boost::asio::ssl::stream_base::handshake_type::client);
-
-    // Form the request. We specify the "Connection: close" header so that the
-    // server will close the socket after transmitting the response. This will
-    // allow us to treat all data up until the EOF as the content.
-    boost::asio::streambuf request;
-    std::ostream request_stream(&request);
-    request_stream << "GET "<< resource <<" HTTP/1.0\r\n";
-    request_stream << "Host: " << website << "\r\n";
-    request_stream << "Accept: */*\r\n";
-    request_stream << "Connection: close\r\n\r\n";
-
-    // Send the request.
-    boost::asio::write(socket, request);
-
-    // Read the response status line. The response streambuf will automatically
-    // grow to accommodate the entire line. The growth may be limited by passing
-    // a maximum size to the streambuf constructor.
-    boost::asio::streambuf response;
-    boost::asio::read_until(socket, response, "\r\n");
-
-    // Check that response is OK.
-    std::istream response_stream(&response);
-    std::string http_version;
-    response_stream >> http_version;
-    unsigned int status_code;
-    response_stream >> status_code;
-    std::string status_message;
-    std::getline(response_stream, status_message);
-    if (!response_stream || http_version.substr(0, 5) != "HTTP/")
-    {
-      std::cout << "Invalid response\n";
-      return 1;
-    }
-    if (status_code != 200)
-    {
-      std::cout << "Response returned with status code " << status_code << "\n";
-      return 1;
-    }
-
-    // Read the response headers, which are terminated by a blank line.
-    boost::asio::read_until(socket, response, "\r\n\r\n");
-
-    // Process the response headers.
-    std::string header;
-    while (std::getline(response_stream, header) && header != "\r")
-      std::cout << header << "\n";
-    std::cout << "\n";
-
-    // Write whatever content we already have to output.
-    if (response.size() > 0)
-      std::cout << &response;
-
-    // Read until EOF, writing data to output as we go.
-    boost::system::error_code error;
-    while (boost::asio::read(socket, response,
-          boost::asio::transfer_at_least(1), error))
-      std::cout << &response;
-    if (error != boost::asio::error::eof)
-      throw boost::system::system_error(error);
-  }
-  catch (std::exception& e)
-  {
-    std::cout << "Exception: " << e.what() << "\n";
-  }
-
-  return 123;
 }
