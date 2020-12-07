@@ -129,6 +129,9 @@ struct flb_stackdriver {
 
     /* Fluent Bit context */
     struct flb_config *config;
+
+    /* C++ flush context context */
+    struct StackdriverFlushContext* flush_ctx;
 };
 
 typedef enum {
@@ -153,5 +156,12 @@ typedef enum {
     INSERTID_INVALID = 1,
     INSERTID_NOT_PRESENT = 2
 } insert_id_status;
+
+char *get_google_token(struct flb_stackdriver *ctx);
+
+int stackdriver_format(struct flb_stackdriver *ctx,
+                              const char *tag, int tag_len,
+                              const char *data, size_t bytes,
+                              flb_sds_t* out_data, size_t *out_size);
 
 #endif
