@@ -1,4 +1,3 @@
-#define BOOST_ASIO_ENABLE_HANDLER_TRACKING
 #define BOOST_NETWORK_ENABLE_HTTPS
 extern "C" {
 #include "stackdriver.h"
