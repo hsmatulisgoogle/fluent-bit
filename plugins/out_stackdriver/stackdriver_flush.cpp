@@ -23,6 +23,7 @@ extern "C" {
 
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
+#include <boost/beast/http/status.hpp>
 #include <boost/beast/version.hpp>
 #include <boost/lexical_cast.hpp>
 
@@ -117,13 +118,27 @@ void cpp_internal_flush(struct flb_stackdriver* plg_ctx, struct flb_thread* call
 
     // Receive the HTTP response
     beast::flat_buffer buffer;
-    http::response<http::dynamic_body> res;
-    http::read(stream, buffer, res);
+    http::response<http::dynamic_body> resp;
+    http::read(stream, buffer, resp);
+    http::status_class status_class = http::to_status_class(resp.result());
+    if (status_class == http::status_class::successful){
+      flb_output_return(FLB_OK, calling_thread);
+      return;
+    } else if (status_class == http::status_class::server_error){
+      flb_output_return(FLB_RETRY, calling_thread);
+      return;
+    } else {
+      flb_output_return(FLB_ERROR, calling_thread);
+      return;
+    }
 
   } catch (std::exception& e) {
     flb_plg_error(plg_ctx->ins, "https request failed: ", e.what());
     flb_output_return(FLB_RETRY, calling_thread);
+    return;
   }
+  flb_plg_error(plg_ctx->ins, "This line shouldn't be executed");
+  flb_output_return(FLB_ERROR, calling_thread);
 
 }
 
