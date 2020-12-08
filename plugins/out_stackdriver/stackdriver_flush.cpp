@@ -1,3 +1,4 @@
+#define BOOST_ASIO_ENABLE_HANDLER_TRACKING
 #define BOOST_NETWORK_ENABLE_HTTPS
 extern "C" {
 #include "stackdriver.h"
@@ -13,7 +14,6 @@ extern "C" {
 #include <vector>
 #include <mutex>
 
-#include <boost/asio/bind_executor.hpp>
 #include <boost/asio/connect.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/post.hpp>
@@ -25,6 +25,8 @@ extern "C" {
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
 #include <boost/beast/version.hpp>
+#include <boost/lexical_cast.hpp>
+
 
 
 namespace beast = boost::beast;
@@ -62,7 +64,7 @@ extern "C" StackdriverFlushContext* stackdriver_cpp_init(int num_threads) {
 
 void cpp_internal_flush(struct flb_stackdriver* plg_ctx, struct flb_thread* calling_thread, const char* data, size_t data_len, const char* tag, int tag_len){
   StackdriverFlushContext* ctx = plg_ctx->flush_ctx;
-  std::cout<<"I am in a post call!!\n\n\n"<<std::endl;
+  std::cout<<"Callback start\n";
 
   /* Get the authorization token */
   std::unique_lock<std::mutex> lock(ctx->mutex);
@@ -74,54 +76,56 @@ void cpp_internal_flush(struct flb_stackdriver* plg_ctx, struct flb_thread* call
     return;
   }
   std::string token = c_token;
-  lock.release();
+  lock.unlock();
 
-  flb_sds_t payload_buf = NULL;
+  flb_sds_t c_payload_buf = NULL;
   size_t payload_size = 0;
   /* Reformat msgpack to stackdriver JSON payload */
   int ret = stackdriver_format(plg_ctx, tag, tag_len,
                                data, data_len,
-                               &payload_buf, &payload_size);
+                               &c_payload_buf, &payload_size);
   if (ret != 0) {
     flb_plg_error(plg_ctx->ins, "cannot format payload JSON");
     flb_output_return(FLB_RETRY, calling_thread);
     return;
   }
+  std::string payload(c_payload_buf, payload_size);
+  flb_sds_destroy(c_payload_buf);
 
   try {
-  // look up endpoint
-  tcp::resolver resolver(ctx->ioc);
-  tcp::resolver::query query(FLB_STD_WRITE_DOMAIN, "https");
-  tcp::resolver::iterator endpoint_iterator = resolver.resolve(query);
+    // look up endpoint
+    tcp::resolver resolver(ctx->ioc);
+    tcp::resolver::query query(FLB_STD_WRITE_DOMAIN, "https");
+    tcp::resolver::iterator endpoint_iterator = resolver.resolve(query);
 
-  // handshake
-  boost::asio::ssl::context ssl_ctx(boost::asio::ssl::context::method::sslv23_client);
-  boost::asio::ssl::stream<tcp::socket> stream(ctx->ioc, ssl_ctx);
-  boost::asio::connect(stream.lowest_layer(), endpoint_iterator);
-  stream.handshake(boost::asio::ssl::stream_base::handshake_type::client);
+    // handshake
+    boost::asio::ssl::context ssl_ctx(boost::asio::ssl::context::method::sslv23_client);
+    boost::asio::ssl::stream<tcp::socket> stream(ctx->ioc, ssl_ctx);
+    boost::asio::connect(stream.lowest_layer(), endpoint_iterator);
+    stream.handshake(boost::asio::ssl::stream_base::handshake_type::client);
 
-  // HTTP request
-  http::request<http::string_body> req{http::verb::post, FLB_STD_WRITE_URI, 11};
-  req.set(http::field::host, FLB_STD_WRITE_DOMAIN);
-  req.set(http::field::user_agent, "Fluent-Bit");
-  req.set(http::field::content_type, "application/json");
-  req.set(http::field::authorization, token);
-  req.set(http::field::content_length, payload_size);
-  req.set(http::field::body, payload_buf);
-  http::write(stream, req);
+    // HTTP request
+    http::request<http::string_body> req{http::verb::post, FLB_STD_WRITE_URI, 11};
+    req.set(http::field::host, FLB_STD_WRITE_DOMAIN);
+    req.set(http::field::user_agent, "Fluent-Bit");
+    req.set(http::field::content_type, "application/json");
+    req.set(http::field::authorization, std::string("Bearer ") + token);
+    req.set(http::field::content_length, boost::lexical_cast<std::string>(payload_size));
+    req.body() = payload;
+    req.prepare_payload();
 
-  // Receive the HTTP response
-  beast::flat_buffer buffer;
-  http::response<http::dynamic_body> res;
-  http::read(stream, buffer, res);
+    http::write(stream, req);
 
-  // Write the message to standard out
-  std::cout << res << std::endl;
+
+    // Receive the HTTP response
+    beast::flat_buffer buffer;
+    http::response<http::dynamic_body> res;
+    http::read(stream, buffer, res);
+
   } catch (std::exception& e) {
     flb_plg_error(plg_ctx->ins, "https request failed: ", e.what());
     flb_output_return(FLB_RETRY, calling_thread);
   }
-  flb_sds_destroy(payload_buf);
 
 }
 
