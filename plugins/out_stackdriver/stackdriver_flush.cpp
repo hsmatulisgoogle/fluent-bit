@@ -88,6 +88,8 @@ void cpp_internal_flush(struct flb_stackdriver* plg_ctx, struct flb_thread* call
     flb_output_return(FLB_RETRY, calling_thread);
     return;
   }
+  std::string payload(c_payload_buf, payload_size);
+  flb_sds_destroy(c_payload_buf);
 
   try {
     // look up endpoint
@@ -108,7 +110,8 @@ void cpp_internal_flush(struct flb_stackdriver* plg_ctx, struct flb_thread* call
     req.set(http::field::content_type, "application/json");
     req.set(http::field::authorization, std::string("Bearer ") + token);
     req.set(http::field::content_length, boost::lexical_cast<std::string>(payload_size));
-    req.body() = c_payload_buf;
+    req.body() = payload;
+    req.prepare_payload();
 
     http::write(stream, req);
 
@@ -119,26 +122,21 @@ void cpp_internal_flush(struct flb_stackdriver* plg_ctx, struct flb_thread* call
     http::read(stream, buffer, resp);
     http::status_class status_class = http::to_status_class(resp.result());
     if (status_class == http::status_class::successful){
-      flb_sds_destroy(c_payload_buf);
       flb_output_return(FLB_OK, calling_thread);
       return;
     } else if (status_class == http::status_class::server_error){
-      flb_sds_destroy(c_payload_buf);
       flb_output_return(FLB_RETRY, calling_thread);
       return;
     } else {
-      flb_sds_destroy(c_payload_buf);
       flb_output_return(FLB_ERROR, calling_thread);
       return;
     }
 
   } catch (std::exception& e) {
-    flb_sds_destroy(c_payload_buf);
     flb_plg_error(plg_ctx->ins, "https request failed: ", e.what());
     flb_output_return(FLB_RETRY, calling_thread);
     return;
   }
-  flb_sds_destroy(c_payload_buf);
   flb_plg_error(plg_ctx->ins, "This line shouldn't be executed");
   flb_output_return(FLB_ERROR, calling_thread);
 
