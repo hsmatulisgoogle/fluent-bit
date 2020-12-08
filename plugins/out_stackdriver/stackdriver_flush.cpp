@@ -88,7 +88,6 @@ void cpp_internal_flush(struct flb_stackdriver* plg_ctx, struct flb_thread* call
     flb_output_return(FLB_RETRY, calling_thread);
     return;
   }
-  std::string payload(c_payload_buf, payload_size);
 
   try {
     // look up endpoint
@@ -109,7 +108,7 @@ void cpp_internal_flush(struct flb_stackdriver* plg_ctx, struct flb_thread* call
     req.set(http::field::content_type, "application/json");
     req.set(http::field::authorization, std::string("Bearer ") + token);
     req.set(http::field::content_length, boost::lexical_cast<std::string>(payload_size));
-    req.body() = payload_buf;
+    req.body() = c_payload_buf;
 
     http::write(stream, req);
 
