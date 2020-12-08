@@ -63,7 +63,6 @@ extern "C" StackdriverFlushContext* stackdriver_cpp_init(int num_threads) {
 
 void cpp_internal_flush(struct flb_stackdriver* plg_ctx, struct flb_thread* calling_thread, const char* data, size_t data_len, const char* tag, int tag_len){
   StackdriverFlushContext* ctx = plg_ctx->flush_ctx;
-  std::cout<<"Callback start\n";
 
   /* Get the authorization token */
   std::unique_lock<std::mutex> lock(ctx->mutex);
