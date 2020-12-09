@@ -16,45 +16,60 @@
  *  See the License for the specific language governing permissions and
  *  limitations under the License.
  */
-
+#include <fluent-bit/flb_info.h>
+#include <fluent-bit/flb_mem.h>
+#include <fluent-bit/flb_sds.h>
+#include <fluent-bit/flb_error.h>
+#include <fluent-bit/flb_utils.h>
+#include <fluent-bit/flb_sds.h>
+#include <fluent-bit/flb_time.h>
+#include <fluent-bit/flb_pack.h>
+#include <fluent-bit/flb_unescape.h>
 #include <fluent-bit.h>
+
+#include <msgpack.h>
+
+#include <stdio.h>
+#include <string.h>
+
+// max json size
+#define BUF_SIZE 1024
 
 int main()
 {
-    int i;
-    int n;
-    char tmp[256];
-    flb_ctx_t *ctx;
-    int in_ffd;
-    int out_ffd;
 
-    /* Initialize library */
-    ctx = flb_create();
-    if (!ctx) {
-        exit(EXIT_FAILURE);
+    // Read JSON in from stdin
+    char buffer[BUF_SIZE];
+    size_t loc = 0;
+    buffer[0] = '\0';
+    while(fgets(buffer + loc, BUF_SIZE - 1 - loc, stdin)) {
+        loc = strlen(buffer);
+    }
+    
+    // json to be used
+    char* json = buffer;
+    
+    char* mp_buf;
+    size_t mp_size;
+    int mp_type;
+    if(flb_pack_json(json, strlen(json), &mp_buf, &mp_size, &mp_type)){
+        printf("error!!!!! can't pack json\n");
+        return 1;
     }
 
-    in_ffd = flb_input(ctx, "lib", NULL);
-    flb_input_set(ctx, in_ffd, "tag", "test", NULL);
+    volatile flb_sds_t out_json = flb_msgpack_raw_to_json_sds(mp_buf, mp_size);
+    printf("%s\n", out_json);
+    flb_sds_destroy(out_json);
 
-    out_ffd = flb_output(ctx, "stdout", NULL);
-    flb_output_set(ctx, out_ffd, "match", "test", NULL);
-
-    /* Start the background worker */
-    flb_start(ctx);
-
-    /* Push some data */
-    for (i = 0; i < 100; i++) {
-        n = snprintf(tmp, sizeof(tmp) - 1,
-                     "[%f, {\"key\": \"val %i\"}]",
-                     flb_time_now(), i);
-        flb_lib_push(ctx, in_ffd, tmp, n);
+    // Convert json to msgpack format
+    for(int i=0; i < 1000000001; i++){
+        out_json = flb_msgpack_raw_to_json_sds(mp_buf, mp_size);
+        if (i % 10000000 == 0){
+            printf("%d\n", i);
+            printf("%s\n", out_json);
+        }
+        flb_sds_destroy(out_json);
     }
-
-    flb_stop(ctx);
-
-    /* Release Resources */
-    flb_destroy(ctx);
 
     return 0;
 }
