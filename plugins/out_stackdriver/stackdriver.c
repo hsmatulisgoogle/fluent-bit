@@ -857,7 +857,7 @@ static int cb_stackdriver_init(struct flb_output_instance *ins,
         io_flags |= FLB_IO_IPV6;
     }
 
-    ctx->flush_ctx = stackdriver_cpp_init(2);
+    ctx->flush_ctx = stackdriver_cpp_init(1);
     ctx->metadata_u = flb_upstream_create_url(config, "http://metadata.google.internal",
                                               FLB_IO_TCP, NULL);
     if (!ctx->metadata_u) {
