@@ -8,6 +8,22 @@ set(FLB_VERSION_PATCH  0)
 set(FLB_VERSION_STR "${FLB_VERSION_MAJOR}.${FLB_VERSION_MINOR}.${FLB_VERSION_PATCH}")
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set (CMAKE_CXX_STANDARD 11)
+
+# Find openssl
+find_package(OpenSSL REQUIRED)
+include_directories(${OpenSSL_INCLUDE_DIRS})
+
+find_library(SSL_LIB libssl.a REQUIRED)
+find_library(CRYPTO_LIB libcrypto.a REQUIRED)
+
+# Find boost
+find_package(Boost REQUIRED system)
+set(Boost_USE_STATIC_LIBS    ON)
+set(Boost_USE_STATIC_RUNTIME    ON)
+include_directories(${Boost_INCLUDE_DIRS})
+
+
 
 # Define macro to identify Windows system (without Cygwin)
 if(CMAKE_SYSTEM_NAME MATCHES "Windows")

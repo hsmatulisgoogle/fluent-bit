@@ -36,6 +36,8 @@
 #include "stackdriver_http_request.h"
 #include "stackdriver_timestamp.h"
 #include "stackdriver_helper.h"
+#include "stackdriver_flush.h"
+
 #include <mbedtls/base64.h>
 #include <mbedtls/sha256.h>
 
@@ -263,7 +265,7 @@ static int get_oauth2_token(struct flb_stackdriver *ctx)
     return 0;
 }
 
-static char *get_google_token(struct flb_stackdriver *ctx)
+char *get_google_token(struct flb_stackdriver *ctx)
 {
     int ret = 0;
 
@@ -855,15 +857,9 @@ static int cb_stackdriver_init(struct flb_output_instance *ins,
         io_flags |= FLB_IO_IPV6;
     }
 
-    /* Create Upstream context for Stackdriver Logging (no oauth2 service) */
-    ctx->u = flb_upstream_create_url(config, FLB_STD_WRITE_URL,
-                                     io_flags, &ins->tls);
+    ctx->flush_ctx = stackdriver_cpp_init(1);
     ctx->metadata_u = flb_upstream_create_url(config, "http://metadata.google.internal",
-                                     FLB_IO_TCP, NULL);
-    if (!ctx->u) {
-        flb_plg_error(ctx->ins, "upstream creation failed");
-        return -1;
-    }
+                                              FLB_IO_TCP, NULL);
     if (!ctx->metadata_u) {
         flb_plg_error(ctx->ins, "metadata upstream creation failed");
         return -1;
@@ -1263,13 +1259,10 @@ static int pack_json_payload(int insert_id_extracted,
         return ret;
 }
 
-static int stackdriver_format(struct flb_config *config,
-                              struct flb_input_instance *ins,
-                              void *plugin_context,
-                              void *flush_ctx,
+int stackdriver_format(struct flb_stackdriver *ctx,
                               const char *tag, int tag_len,
-                              const void *data, size_t bytes,
-                              void **out_data, size_t *out_size)
+                              const char *data, size_t bytes,
+                              flb_sds_t* out_data, size_t *out_size)
 {
     int len;
     int ret;
@@ -1289,7 +1282,6 @@ static int stackdriver_format(struct flb_config *config,
     msgpack_sbuffer mp_sbuf;
     msgpack_packer mp_pck;
     flb_sds_t out_buf;
-    struct flb_stackdriver *ctx = plugin_context;
 
     /* Parameters for severity */
     int severity_extracted = FLB_FALSE;
@@ -1881,31 +1873,14 @@ static void cb_stackdriver_flush(const void *data, size_t bytes,
     char *token;
     flb_sds_t payload_buf;
     size_t payload_size;
-    void *out_buf;
-    size_t out_size;
     struct flb_stackdriver *ctx = out_context;
     struct flb_upstream_conn *u_conn;
     struct flb_http_client *c;
 
-    /* Get upstream connection */
-    u_conn = flb_upstream_conn_get(ctx->u);
-    if (!u_conn) {
-        FLB_OUTPUT_RETURN(FLB_RETRY);
-    }
+    struct flb_thread *cur_thread = (struct flb_thread *) pthread_getspecific(flb_thread_key);
+    stackdriver_cpp_flush(ctx, cur_thread, data, bytes, tag, tag_len);
+    FLB_OUTPUT_RETURN(FLB_RETRY);
 
-    /* Reformat msgpack to stackdriver JSON payload */
-    ret = stackdriver_format(config, i_ins,
-                             ctx, NULL,
-                             tag, tag_len,
-                             data, bytes,
-                             &out_buf, &out_size);
-    if (ret != 0) {
-        flb_upstream_conn_release(u_conn);
-        FLB_OUTPUT_RETURN(FLB_RETRY);
-    }
-
-    payload_buf = (flb_sds_t) out_buf;
-    payload_size = out_size;
 
     /* Get or renew Token */
     token = get_google_token(ctx);
@@ -1985,7 +1960,7 @@ struct flb_output_plugin out_stackdriver_plugin = {
     .cb_exit      = cb_stackdriver_exit,
 
     /* Test */
-    .test_formatter.callback = stackdriver_format,
+    //.test_formatter.callback = stackdriver_format,
 
     /* Plugin flags */
     .flags          = FLB_OUTPUT_NET | FLB_IO_TLS,

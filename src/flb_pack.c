@@ -682,9 +682,11 @@ flb_sds_t flb_msgpack_raw_to_json_sds(const void *in_buf, size_t in_size)
     }
 
     root = &result.data;
+    int increase_count = 0;
     while (1) {
         ret = flb_msgpack_to_json(out_buf, out_size, root);
         if (ret <= 0) {
+            increase_count++;
             tmp_buf = flb_sds_increase(out_buf, 256);
             if (tmp_buf) {
                 out_buf = tmp_buf;
@@ -701,6 +703,7 @@ flb_sds_t flb_msgpack_raw_to_json_sds(const void *in_buf, size_t in_size)
             break;
         }
     }
+    printf("increase_count: %d\tin_size: %lu\tout_size: %d\n", increase_count, in_size, ret);
 
     msgpack_unpacked_destroy(&result);
     flb_sds_len_set(out_buf, ret);
