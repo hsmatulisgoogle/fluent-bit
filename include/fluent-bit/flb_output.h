@@ -575,27 +575,6 @@ static inline void flb_output_return(int ret, struct flb_thread *th) {
     if (n == -1) {
         flb_errno();
     }
-
-#ifdef FLB_HAVE_METRICS
-    if (out_th->o_ins->metrics) {
-        if (ret == FLB_OK) {
-            records = task->records;
-            flb_metrics_sum(FLB_METRIC_OUT_OK_RECORDS, records,
-                            out_th->o_ins->metrics);
-            flb_metrics_sum(FLB_METRIC_OUT_OK_BYTES, task->size,
-                            out_th->o_ins->metrics);
-        }
-        else if (ret == FLB_ERROR) {
-            flb_metrics_sum(FLB_METRIC_OUT_ERROR, 1, out_th->o_ins->metrics);
-        }
-        else if (ret == FLB_RETRY) {
-            /*
-             * Counting retries is happening in the event loop/scheduler side
-             * since it also needs to count if some retry fails to re-schedule.
-             */
-        }
-    }
-#endif
 }
 
 static inline void flb_output_return_do(int x)

@@ -106,6 +106,7 @@ static inline int handle_output_event(flb_pipefd_t fd, struct flb_config *config
     int thread_id;
     int retries;
     int retry_seconds;
+    int records;
     uint32_t type;
     uint32_t key;
     uint64_t val;
@@ -162,6 +163,14 @@ static inline int handle_output_event(flb_pipefd_t fd, struct flb_config *config
 
     /* A thread has finished, delete it */
     if (ret == FLB_OK) {
+
+#ifdef FLB_HAVE_METRICS
+        records = task->records;
+        flb_metrics_sum(FLB_METRIC_OUT_OK_RECORDS, records,
+                        out_th->o_ins->metrics);
+        flb_metrics_sum(FLB_METRIC_OUT_OK_BYTES, task->size,
+                        out_th->o_ins->metrics);
+#endif
         /* Inform the user if a 'retry' succedeed */
         if (mk_list_size(&task->retries) > 0) {
             retries = flb_task_retry_count(task, out_th->parent);
@@ -258,6 +267,9 @@ static inline int handle_output_event(flb_pipefd_t fd, struct flb_config *config
         }
     }
     else if (ret == FLB_ERROR) {
+#ifdef FLB_HAVE_METRICS
+        flb_metrics_sum(FLB_METRIC_OUT_ERROR, 1, out_th->o_ins->metrics);
+#endif
         flb_output_thread_destroy_id(thread_id, task);
         if (task->users == 0 && mk_list_size(&task->retries) == 0) {
             flb_task_destroy(task, FLB_TRUE);
