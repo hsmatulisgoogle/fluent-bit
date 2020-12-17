@@ -49,10 +49,11 @@
 #endif
 
 /* Output plugin masks */
-#define FLB_OUTPUT_NET           32  /* output address may set host and port */
+#define FLB_OUTPUT_NET            32  /* output address may set host and port */
 #define FLB_OUTPUT_PLUGIN_CORE    0
 #define FLB_OUTPUT_PLUGIN_PROXY   1
-#define FLB_OUTPUT_NO_MULTIPLEX 512
+#define FLB_OUTPUT_NO_MULTIPLEX   512
+#define FLB_OUTPUT_MULTITHREAD    1024
 
 /*
  * Tests callbacks
@@ -485,7 +486,11 @@ struct flb_thread *flb_output_thread(struct flb_task *task,
     struct flb_thread *th;
 
     /* Create a new thread */
-    th = flb_thread_new(sizeof(struct flb_output_thread), cb_output_thread_destroy, FLB_THREAD_RUN_ANYWHERE);
+    int worker_id = FLB_THREAD_RUN_MAIN_ONLY;
+    if (o_ins->flags & FLB_OUTPUT_MULTITHREAD) {
+        worker_id = FLB_THREAD_RUN_ANYWHERE;
+    }
+    th = flb_thread_new(sizeof(struct flb_output_thread), cb_output_thread_destroy, worker_id);
     if (!th) {
         return NULL;
     }
