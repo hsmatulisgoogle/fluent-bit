@@ -38,6 +38,9 @@
 #include "stackdriver_helper.h"
 #include <mbedtls/base64.h>
 #include <mbedtls/sha256.h>
+#include <pthread.h>
+
+
 
 /*
  * Base64 Encoding in JWT must:
@@ -263,9 +266,16 @@ static int get_oauth2_token(struct flb_stackdriver *ctx)
     return 0;
 }
 
+static pthread_mutex_t token_mutex = PTHREAD_MUTEX_INITIALIZER;
 static char *get_google_token(struct flb_stackdriver *ctx)
 {
     int ret = 0;
+    char* output = NULL;
+
+    if (pthread_mutex_lock(&token_mutex)){
+        flb_plg_error(ctx->ins, "error locking mutex");
+        return NULL;
+    }
 
     if (!ctx->o) {
         ret = get_oauth2_token(ctx);
@@ -275,11 +285,16 @@ static char *get_google_token(struct flb_stackdriver *ctx)
         ret = get_oauth2_token(ctx);
     }
 
-    if (ret != 0) {
+    if (ret == 0) {
+        output = ctx->o->access_token;
+    }
+
+    if (pthread_mutex_unlock(&token_mutex)){
+        flb_plg_error(ctx->ins, "error locking mutex");
         return NULL;
     }
 
-    return ctx->o->access_token;
+    return output;
 }
 
 static bool validate_msgpack_unpacked_data(msgpack_object root)
@@ -1867,6 +1882,7 @@ static void set_authorization_header(struct flb_http_client *c,
     flb_http_add_header(c, "Authorization", 13, header, len);
 }
 
+
 static void cb_stackdriver_flush(const void *data, size_t bytes,
                                  const char *tag, int tag_len,
                                  struct flb_input_instance *i_ins,
@@ -1988,5 +2004,5 @@ struct flb_output_plugin out_stackdriver_plugin = {
     .test_formatter.callback = stackdriver_format,
 
     /* Plugin flags */
-    .flags          = FLB_OUTPUT_NET | FLB_IO_TLS,
+    .flags          = FLB_OUTPUT_NET | FLB_IO_TLS | FLB_OUTPUT_MULTITHREAD,
 };
