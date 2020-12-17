@@ -86,6 +86,8 @@ struct flb_upstream {
 
     struct mk_list destroy_queue;
 
+    pthread_mutex_t connection_pool_mutex;
+
 #ifdef FLB_HAVE_TLS
     /* context with mbedTLS data to handle certificates and keys */
     struct flb_tls *tls;

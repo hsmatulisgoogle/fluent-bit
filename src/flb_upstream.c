@@ -29,6 +29,21 @@
 #include <fluent-bit/flb_tls.h>
 #include <fluent-bit/flb_utils.h>
 
+#include <pthread.h>
+
+#define LOCK_OR_RETURN(mutex, ret)  {                   \
+    if (pthread_mutex_lock(mutex)){ \
+        flb_error("error locking mutex");               \
+        return ret;                                      \
+    }                                                   \
+    }
+#define UNLOCK_OR_RETURN(mutex, ret)  {                       \
+        if (pthread_mutex_unlock(mutex)){                     \
+            flb_error("error locking mutex");                 \
+            return ret;                                       \
+        }                                                     \
+    }
+
 /* Config map for Upstream networking setup */
 struct flb_config_map upstream_net[] = {
     {
@@ -139,6 +154,8 @@ struct flb_upstream *flb_upstream_create(struct flb_config *config,
     u->evl            = config->evl;
     u->n_connections  = 0;
     u->flags         |= FLB_IO_ASYNC;
+
+    pthread_mutex_init(&u->connection_pool_mutex, NULL);
 
     mk_list_init(&u->av_queue);
     mk_list_init(&u->busy_queue);
@@ -353,6 +370,7 @@ int flb_upstream_destroy(struct flb_upstream *u)
     flb_free(u->proxy_username);
     flb_free(u->proxy_password);
     mk_list_del(&u->_head);
+    pthread_mutex_destroy(&u->connection_pool_mutex);
     flb_free(u);
 
     return 0;
@@ -386,9 +404,11 @@ struct flb_upstream_conn *flb_upstream_conn_get(struct flb_upstream *u)
               u->net.keepalive ? "enabled": "disabled",
               u->net.keepalive_idle_timeout);
 
+    LOCK_OR_RETURN(&u->connection_pool_mutex, NULL);
     /* On non Keepalive mode, always create a new TCP connection */
     if (u->net.keepalive == FLB_FALSE) {
-        return create_conn(u);
+        conn = create_conn(u);
+        UNLOCK_OR_RETURN(&u->connection_pool_mutex, NULL);
     }
 
     /*
@@ -429,6 +449,7 @@ struct flb_upstream_conn *flb_upstream_conn_get(struct flb_upstream *u)
          *
          * So just return the connection context.
          */
+        UNLOCK_OR_RETURN(&u->connection_pool_mutex, NULL);
         return conn;
     }
 
@@ -437,6 +458,7 @@ struct flb_upstream_conn *flb_upstream_conn_get(struct flb_upstream *u)
         conn = create_conn(u);
     }
 
+    UNLOCK_OR_RETURN(&u->connection_pool_mutex, NULL);
     return conn;
 }
 
@@ -447,13 +469,17 @@ struct flb_upstream_conn *flb_upstream_conn_get(struct flb_upstream *u)
 static int cb_upstream_conn_ka_dropped(void *data)
 {
     struct flb_upstream_conn *conn;
+    int ret;
 
     conn = (struct flb_upstream_conn *) data;
 
     flb_debug("[upstream] KA connection #%i to %s:%i has been disconnected "
               "by the remote service",
               conn->fd, conn->u->tcp_host, conn->u->tcp_port);
-    return destroy_conn(conn);
+    LOCK_OR_RETURN(&conn->u->connection_pool_mutex, -1);
+    ret = destroy_conn(conn);
+    UNLOCK_OR_RETURN(&conn->u->connection_pool_mutex, -1);
+    return ret;
 }
 
 int flb_upstream_conn_release(struct flb_upstream_conn *conn)
@@ -463,6 +489,8 @@ int flb_upstream_conn_release(struct flb_upstream_conn *conn)
 
     /* Upstream context */
     u = conn->u;
+
+    LOCK_OR_RETURN(&u->connection_pool_mutex, -1);
 
     /* If this is a valid KA connection just recycle */
     if (conn->u->net.keepalive == FLB_TRUE && conn->recycle == FLB_TRUE && conn->fd > -1) {
@@ -489,7 +517,10 @@ int flb_upstream_conn_release(struct flb_upstream_conn *conn)
             flb_debug("[upstream] KA connection #%i to %s:%i could not be "
                       "registered, closing.",
                       conn->fd, conn->u->tcp_host, conn->u->tcp_port);
-            return destroy_conn(conn);
+            ret = destroy_conn(conn);
+
+            UNLOCK_OR_RETURN(&u->connection_pool_mutex, -1);
+            return ret;
         }
 
         flb_debug("[upstream] KA connection #%i to %s:%i is now available",
@@ -499,14 +530,23 @@ int flb_upstream_conn_release(struct flb_upstream_conn *conn)
         /* if we have exceeded our max number of uses of this connection, destroy it */
         if (conn->u->net.keepalive_max_recycle > 0 && conn->ka_count > conn->u->net.keepalive_max_recycle) {
             flb_debug("[upstream] KA count %i exceeded configured limit of %i: closing.", conn->ka_count, conn->u->net.keepalive_max_recycle);
-            return destroy_conn(conn);
+            ret = destroy_conn(conn);
+            UNLOCK_OR_RETURN(&u->connection_pool_mutex, -1);
+            return ret;
         }
+
+        UNLOCK_OR_RETURN(&u->connection_pool_mutex, -1);
 
         return 0;
     }
 
     /* No keepalive connections must be destroyed */
-    return destroy_conn(conn);
+    ret = destroy_conn(conn);
+
+
+    UNLOCK_OR_RETURN(&u->connection_pool_mutex, -1);
+    return ret;
+
 }
 
 int flb_upstream_conn_timeouts(struct flb_config *ctx)
@@ -519,6 +559,8 @@ int flb_upstream_conn_timeouts(struct flb_config *ctx)
     struct flb_upstream_conn *u_conn;
 
     now = time(NULL);
+
+    LOCK_OR_RETURN(&u->connection_pool_mutex, -1);
 
     /* Iterate all upstream contexts */
     mk_list_foreach(head, &ctx->upstreams) {
@@ -565,6 +607,7 @@ int flb_upstream_conn_timeouts(struct flb_config *ctx)
         }
 
     }
+    UNLOCK_OR_RETURN(&u->connection_pool_mutex, -1);
 
     return 0;
 }
