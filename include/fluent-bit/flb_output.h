@@ -485,8 +485,7 @@ struct flb_thread *flb_output_thread(struct flb_task *task,
     struct flb_thread *th;
 
     /* Create a new thread */
-    th = flb_thread_new(sizeof(struct flb_output_thread),
-                        cb_output_thread_destroy);
+    th = flb_thread_new(sizeof(struct flb_output_thread), cb_output_thread_destroy, FLB_THREAD_RUN_ANYWHERE);
     if (!th) {
         return NULL;
     }

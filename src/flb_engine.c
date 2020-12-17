@@ -27,6 +27,7 @@
 #include <fluent-bit/flb_bits.h>
 
 #include <fluent-bit/flb_macros.h>
+#include <fluent-bit/flb_mem.h>
 #include <fluent-bit/flb_pipe.h>
 #include <fluent-bit/flb_input.h>
 #include <fluent-bit/flb_output.h>
@@ -416,13 +417,127 @@ static int flb_engine_log_start(struct flb_config *config)
     return 0;
 }
 
-int flb_engine_start(struct flb_config *config)
+struct flb_engine_worker_argument {
+    struct flb_config *config;
+    int worker_id;
+};
+
+void flb_engine_worker(void *arguments_struct)
+{
+    #define MAX_WORKER_NAME_SIZE 100
+    int ret;
+    char worker_name[MAX_WORKER_NAME_SIZE];
+    struct mk_event *event;
+
+    // Unpack arguments and free struct containing them
+    struct flb_config *config = ((struct flb_engine_worker_argument*)  arguments_struct)->config;
+    int worker_id = ((struct flb_engine_worker_argument*)  arguments_struct)->worker_id;
+    struct mk_event_loop *evl = config->os_workers_evl[worker_id];
+    flb_pipefd_t channel = config->os_workers_ch[0][worker_id];
+    flb_free(arguments_struct);
+
+    // Name the worker thread
+    ret = snprintf(worker_name, MAX_WORKER_NAME_SIZE, "flb-output-worker-%d", worker_id);
+    if (ret < 0){
+        // Report error and stop engine
+        flb_error("[engine] failed to initialize output worker %d", worker_id);
+        flb_engine_exit(config);
+        return;
+    }
+    mk_utils_worker_rename(worker_name);
+
+
+    // Sit in the event loop waiting for things to happen
+    while (1) {
+        mk_event_wait(evl);
+        mk_event_foreach(event, evl) {
+            if (event->type == FLB_ENGINE_EV_THREAD) {
+                struct flb_upstream_conn *u_conn;
+                struct flb_thread *th;
+
+                /*
+                 * Check if we have some co-routine associated to this event,
+                 * if so, resume the co-routine
+                 */
+                u_conn = (struct flb_upstream_conn *) event;
+                th = u_conn->thread;
+                if (th) {
+                    flb_trace("[engine] resuming thread=%p", th);
+                    flb_thread_resume(th);
+                }
+            } else {
+                // Running a thread
+                struct flb_thread *th;
+                ret = flb_pipe_r(channel, &th, sizeof(th));
+                if (ret == 0){
+                    // Pipe closed, exit and clean up
+                    // Todo...
+                    return;
+                } else if (ret < 0){
+                    flb_errno();
+                    flb_engine_exit(config);
+                    return;
+                }
+                flb_thread_resume(th);
+            }
+        }
+    }
+}
+
+
+int flb_engine_start_workers(struct flb_config *config)
+{
+    int ret;
+    config->os_workers_len = 1;
+    if (config->os_workers_len <= 0) {
+        return 0;
+    }
+
+    config->os_workers         = flb_malloc(sizeof(pthread_t)              * config->os_workers_len);
+    config->os_workers_ch[0]   = flb_malloc(sizeof(flb_pipefd_t)           * config->os_workers_len);
+    config->os_workers_ch[1]   = flb_malloc(sizeof(flb_pipefd_t)           * config->os_workers_len);
+    config->os_workers_evl     = flb_malloc(sizeof(struct mk_event_loop *) * config->os_workers_len);
+    config->os_workers_event   = flb_malloc(sizeof(struct mk_event)        * config->os_workers_len);
+    if (config->os_workers == NULL || config->os_workers_ch[0] == NULL || config->os_workers_ch[1] == NULL || config->os_workers_evl == NULL || config->os_workers_event == NULL){
+        return -1;
+    }
+
+    for (int i=0; i < config->os_workers_len; i++) {
+        config->os_workers_evl[i] = mk_event_loop_create(256);
+        if (!config->os_workers_evl[i]) {
+            return -1;
+        }
+        ret = mk_event_channel_create(config->os_workers_evl[i],
+                                      &config->os_workers_ch[0][i],
+                                      &config->os_workers_ch[1][i],
+                                      &config->os_workers_event[i]);
+        if (ret != 0) {
+            return -1;
+        }
+
+        struct flb_engine_worker_argument *arg = flb_malloc(sizeof(struct flb_engine_worker_argument));
+        if (arg == NULL){
+            return -1;
+        }
+        arg->worker_id = i;
+        arg->config = config;;
+        ret = mk_utils_worker_spawn(flb_engine_worker, arg, &config->os_workers[i]);
+        if (ret == -1) {
+            return -1;
+        }
+
+    }
+    return 0;
+}
+
+    int flb_engine_start(struct flb_config *config)
 {
     int ret;
     char tmp[16];
     struct flb_time t_flush;
     struct mk_event *event;
     struct mk_event_loop *evl;
+    int next_out_thread = 0;
 
     /* HTTP Server */
 #ifdef FLB_HAVE_HTTP
@@ -430,6 +545,12 @@ int flb_engine_start(struct flb_config *config)
         flb_http_server_start(config);
     }
 #endif
+
+    /* Start output plugin worker threads */
+    ret = flb_engine_start_workers(config);
+    if (ret == -1){
+        return -1;
+    }
 
     /* Create the event loop and set it in the global configuration */
     evl = mk_event_loop_create(256);
@@ -451,6 +572,7 @@ int flb_engine_start(struct flb_config *config)
                                            tmp, sizeof(tmp));
     flb_debug("[engine] coroutine stack size: %u bytes (%s)",
               config->coro_stack_size, tmp);
+
 
     /*
      * Create a communication channel: this routine creates a channel to
@@ -510,7 +632,7 @@ int flb_engine_start(struct flb_config *config)
         flb_utils_error(FLB_ERR_CFG_FLUSH_CREATE);
     }
 
-    /* Initialize the scheduler */
+    /* Initialize the scheduler*/
     ret = flb_sched_init(config);
     if (ret == -1) {
         flb_error("[engine] scheduler could not start");
@@ -642,8 +764,34 @@ int flb_engine_start(struct flb_config *config)
                 u_conn = (struct flb_upstream_conn *) event;
                 th = u_conn->thread;
                 if (th) {
-                    flb_trace("[engine] resuming thread=%p", th);
-                    flb_thread_resume(th);
+                    if (config->os_workers_len == 0 || th->worker_id == FLB_THREAD_RUN_MAIN_ONLY){
+                        flb_trace("[engine] resuming thread=%p", th);
+                        flb_thread_resume(th);
+                    } else if (th->worker_id >= 0) {
+                        ret = flb_pipe_w(config->os_workers_ch[1][next_out_thread], &th, sizeof(struct flb_thread *));
+                        if (ret == -1) {
+                            flb_errno();
+                            flb_error("[engine] cannot send work to worker");
+                        } else if (ret == 0){
+                            flb_error("[engine] cannot send work to worker, pipe got EOF");
+                        }
+
+                    } else {
+                        for (int i=0; i < config->os_workers_len; i++){
+                            ret = flb_pipe_w(config->os_workers_ch[1][next_out_thread], &th, sizeof(struct flb_thread *));
+                            if (ret == -1) {
+                                flb_errno();
+                                flb_error("[engine] cannot send work to worker");
+                            } else if (ret == 0){
+                                flb_error("[engine] cannot send work to worker, pipe got EOF");
+                            }
+                            next_out_thread = (next_out_thread + 1 ) % config->os_workers_len;
+                        }
+                        if (ret <= 0){
+                            flb_error("[engine] cannot talk to any worker threads");
+                            flb_engine_exit(config);
+                        }
+                    }
                 }
             }
             else if (event->type == FLB_ENGINE_EV_OUTPUT) {

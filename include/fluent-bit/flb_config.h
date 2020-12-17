@@ -63,6 +63,13 @@ struct flb_config {
     flb_pipefd_t ch_manager[2];  /* channel to administrate fluent bit     */
     flb_pipefd_t ch_notif[2];    /* channel to receive notifications       */
 
+    /* Keeps track of output plugin threads  */
+    int os_workers_len;                      /* number of worker OS threads */
+    pthread_t *os_workers;                  /* output worker tids */
+    flb_pipefd_t *os_workers_ch[2];         /* channels to send data to output workers */
+    struct mk_event_loop **os_workers_evl;  /* event loop for output workers */
+    struct mk_event *os_workers_event;      /* event for output worker pipes */
+
     /* Channel event loop (just for ch_notif) */
     struct mk_event_loop *ch_evl;
 

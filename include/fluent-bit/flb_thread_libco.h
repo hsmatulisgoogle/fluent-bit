@@ -36,6 +36,8 @@
 #include <valgrind/valgrind.h>
 #endif
 
+#define FLB_THREAD_RUN_ANYWHERE      (-1)
+#define FLB_THREAD_RUN_MAIN_ONLY      (-2)
 struct flb_thread {
 
 #ifdef FLB_HAVE_VALGRIND
@@ -45,6 +47,14 @@ struct flb_thread {
     /* libco 'contexts' */
     cothread_t caller;
     cothread_t callee;
+
+    /* Worker thread id to run this thread on.
+     * FLB_THREAD_RUN_ANYWHERE allows the thread to run on any worker
+     * FLB_THREAD_RUN_MAIN_ONLY requires the thread to run in the main thread
+     * A non-negative value corresponds to the worker id of the worker
+     * that can run this thread.
+     */
+    int worker_id;
 
     void *data;
 
@@ -109,7 +119,7 @@ static FLB_INLINE void flb_thread_resume(struct flb_thread *th)
 }
 
 static FLB_INLINE struct flb_thread *flb_thread_new(size_t data_size,
-                                         void (*cb_destroy) (void *))
+                                                    void (*cb_destroy) (void *), int worker_to_run_on)
 
 {
     void *p;
@@ -124,6 +134,7 @@ static FLB_INLINE struct flb_thread *flb_thread_new(size_t data_size,
 
     th = (struct flb_thread *) p;
     th->cb_destroy = NULL;
+    th->worker_id = worker_to_run_on;
 
     flb_trace("[thread %p] created (custom data at %p, size=%lu",
               th, FLB_THREAD_DATA(th), data_size);

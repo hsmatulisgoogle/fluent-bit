@@ -31,7 +31,6 @@
 #include <fluent-bit/flb_bits.h>
 #include <fluent-bit/flb_pipe.h>
 #include <fluent-bit/flb_filter.h>
-#include <fluent-bit/flb_thread.h>
 #include <fluent-bit/flb_mp.h>
 
 #ifdef FLB_HAVE_METRICS
@@ -333,7 +332,7 @@ struct flb_thread *flb_input_thread(struct flb_input_instance *i_ins,
     struct flb_thread *th;
     struct flb_input_thread *in_th;
 
-    th = flb_thread_new(sizeof(struct flb_input_thread), NULL);
+    th = flb_thread_new(sizeof(struct flb_input_thread), NULL, FLB_THREAD_RUN_MAIN_ONLY);
     if (!th) {
         return NULL;
     }
