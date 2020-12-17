@@ -560,11 +560,12 @@ int flb_upstream_conn_timeouts(struct flb_config *ctx)
 
     now = time(NULL);
 
-    LOCK_OR_RETURN(&u->connection_pool_mutex, -1);
 
     /* Iterate all upstream contexts */
     mk_list_foreach(head, &ctx->upstreams) {
         u = mk_list_entry(head, struct flb_upstream, _head);
+
+        LOCK_OR_RETURN(&u->connection_pool_mutex, -1);
 
         /* Iterate every busy connection */
         mk_list_foreach(u_head, &u->busy_queue) {
@@ -605,9 +606,8 @@ int flb_upstream_conn_timeouts(struct flb_config *ctx)
                           u_conn->fd, u->tcp_host, u->tcp_port);
             }
         }
-
+        UNLOCK_OR_RETURN(&u->connection_pool_mutex, -1);
     }
-    UNLOCK_OR_RETURN(&u->connection_pool_mutex, -1);
 
     return 0;
 }
