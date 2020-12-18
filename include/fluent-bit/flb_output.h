@@ -490,7 +490,8 @@ struct flb_thread *flb_output_thread(struct flb_task *task,
     if (o_ins->flags & FLB_OUTPUT_MULTITHREAD) {
         worker_id = FLB_THREAD_RUN_ANYWHERE;
     }
-    th = flb_thread_new(sizeof(struct flb_output_thread), cb_output_thread_destroy, worker_id);
+
+    th = flb_thread_new(sizeof(struct flb_output_thread), cb_output_thread_destroy, worker_id, o_ins->ch_events[1]);
     if (!th) {
         return NULL;
     }
@@ -547,7 +548,6 @@ struct flb_thread *flb_output_thread(struct flb_task *task,
  * a return value. The return value is either FLB_OK, FLB_RETRY or FLB_ERROR.
  */
 static inline void flb_output_return(int ret, struct flb_thread *th) {
-    int n;
     uint32_t set;
     uint64_t val;
     struct flb_task *task;
@@ -570,11 +570,7 @@ static inline void flb_output_return(int ret, struct flb_thread *th) {
      */
     set = FLB_TASK_SET(ret, task->id, out_th->id);
     val = FLB_BITS_U64_SET(2 /* FLB_ENGINE_TASK */, set);
-
-    n = flb_pipe_w(out_th->o_ins->ch_events[1], (void *) &val, sizeof(val));
-    if (n == -1) {
-        flb_errno();
-    }
+    flb_thread_return(val, th);
 }
 
 static inline void flb_output_return_do(int x)

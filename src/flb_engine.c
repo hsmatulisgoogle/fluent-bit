@@ -776,16 +776,20 @@ int flb_engine_start_workers(struct flb_config *config)
                 u_conn = (struct flb_upstream_conn *) event;
                 th = u_conn->thread;
                 if (th) {
-                    if (config->os_workers_len == 0 || th->worker_id == FLB_THREAD_RUN_MAIN_ONLY){
+                    if (!__atomic_test_and_set (&th->scheduled, __ATOMIC_ACQUIRE)){
+                        // This is already scheduled
+                        continue;
+                    }
+                    if (config->os_workers_len == 0 || th->desired_worker_id == FLB_THREAD_RUN_MAIN_ONLY){
                         flb_trace("[engine] resuming thread=%p", th);
                         flb_thread_resume(th);
-                    } else if (th->worker_id >= 0) {
+                    } else if (th->desired_worker_id >= 0) {
                         ret = flb_pipe_w(config->os_workers_ch[1][next_out_thread], &th, sizeof(struct flb_thread *));
                         if (ret == -1) {
                             flb_errno();
-                            flb_error("[engine] cannot send work to worker");
+                            flb_error("[engine] cannot send work to worker %d but thread %p can only be scheduled there", next_out_thread, th);
                         } else if (ret == 0){
-                            flb_error("[engine] cannot send work to worker, pipe got EOF");
+                            flb_error("[engine] cannot send work to worker %d (EOF) but thread %p can only be scheduled there", next_out_thread, th);
                         }
 
                     } else {
@@ -793,9 +797,9 @@ int flb_engine_start_workers(struct flb_config *config)
                             ret = flb_pipe_w(config->os_workers_ch[1][next_out_thread], &th, sizeof(struct flb_thread *));
                             if (ret == -1) {
                                 flb_errno();
-                                flb_error("[engine] cannot send work to worker");
+                                flb_error("[engine] cannot send work to worker %d", next_out_thread);
                             } else if (ret == 0){
-                                flb_error("[engine] cannot send work to worker, pipe got EOF");
+                                flb_error("[engine] cannot send work to worker %d (EOF)", next_out_thread);
                             }
                             next_out_thread = (next_out_thread + 1 ) % config->os_workers_len;
                         }

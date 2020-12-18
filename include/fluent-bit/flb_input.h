@@ -332,7 +332,7 @@ struct flb_thread *flb_input_thread(struct flb_input_instance *i_ins,
     struct flb_thread *th;
     struct flb_input_thread *in_th;
 
-    th = flb_thread_new(sizeof(struct flb_input_thread), NULL, FLB_THREAD_RUN_MAIN_ONLY);
+    th = flb_thread_new(sizeof(struct flb_input_thread), NULL, FLB_THREAD_RUN_MAIN_ONLY, config->ch_manager[1]);
     if (!th) {
         return NULL;
     }
@@ -424,7 +424,6 @@ struct flb_thread *flb_input_thread_collect(struct flb_input_collector *coll,
  * will be returned instead.
  */
 static inline void flb_input_return(struct flb_thread *th) {
-    int n;
     uint64_t val;
     struct flb_input_thread *in_th;
 
@@ -440,10 +439,7 @@ static inline void flb_input_return(struct flb_thread *th) {
      * We put together the return value with the task_id on the 32 bits at right
      */
     val = FLB_BITS_U64_SET(3 /* FLB_ENGINE_IN_THREAD */, in_th->id);
-    n = flb_pipe_w(in_th->config->ch_manager[1], (void *) &val, sizeof(val));
-    if (n == -1) {
-        flb_errno();
-    }
+    flb_thread_return(val, th);
 }
 
 static inline int flb_input_buf_paused(struct flb_input_instance *i)
@@ -460,7 +456,7 @@ static inline void FLB_INPUT_RETURN()
     struct flb_thread *th;
     th = (struct flb_thread *) pthread_getspecific(flb_thread_key);
     flb_input_return(th);
-    flb_thread_return(th);
+    flb_thread_yield(th, FLB_TRUE);
 }
 
 static inline int flb_input_config_map_set(struct flb_input_instance *ins,

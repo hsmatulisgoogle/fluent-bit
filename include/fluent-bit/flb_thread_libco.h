@@ -54,7 +54,18 @@ struct flb_thread {
      * A non-negative value corresponds to the worker id of the worker
      * that can run this thread.
      */
-    int worker_id;
+    int desired_worker_id;
+
+    /* Did this coroutine return? */
+    int returned;
+    uint64_t return_val;
+
+    /* Is this coroutine able to be scheduled?
+     * Prevents scheduling a thread multiple times.   */
+    char scheduled;
+
+    /* Channel this thread uses for returning */
+    flb_pipefd_t ret_channel;
 
     void *data;
 
@@ -98,28 +109,40 @@ static FLB_INLINE void flb_thread_destroy(struct flb_thread *th)
     flb_free(th);
 }
 
-#define flb_thread_return(th) co_switch(th->caller)
 
 static FLB_INLINE void flb_thread_resume(struct flb_thread *th)
 {
     pthread_setspecific(flb_thread_key, (void *) th);
 
-    /*
-     * In the past we used to have a flag to mark when a coroutine
-     * has finished (th->ended == MK_TRUE), now we let the coroutine
-     * to submit an event to the event loop indicating what's going on
-     * through the call FLB_OUTPUT_RETURN(...).
-     *
-     * So we just swap context and let the event loop to handle all
-     * the cleanup required.
-     */
+    if(th->returned) {
+        flb_error("[thread] running coroutine that already returned");
+        return;
+    }
 
     th->caller = co_active();
     co_switch(th->callee);
+
+    if(th->returned) {
+        int n = flb_pipe_w(th->ret_channel, (void *) &th->return_val, sizeof(th->return_val));
+        if (n == -1) {
+            flb_errno();
+        }
+    } else {
+        __atomic_clear(&th->scheduled, __ATOMIC_RELEASE);
+    }
+
+}
+
+
+static FLB_INLINE void flb_thread_return(uint64_t val, struct flb_thread *th)
+{
+    th->returned = 1;
+    th->return_val = val;
+
 }
 
 static FLB_INLINE struct flb_thread *flb_thread_new(size_t data_size,
-                                                    void (*cb_destroy) (void *), int worker_to_run_on)
+                                                    void (*cb_destroy) (void *), int desired_worker_id, flb_pipefd_t ret_channel)
 
 {
     void *p;
@@ -134,7 +157,11 @@ static FLB_INLINE struct flb_thread *flb_thread_new(size_t data_size,
 
     th = (struct flb_thread *) p;
     th->cb_destroy = NULL;
-    th->worker_id = worker_to_run_on;
+    th->desired_worker_id = desired_worker_id;
+    th->returned = 0;
+    th->return_val = (uint64_t) 0;
+    __atomic_clear(&th->scheduled, __ATOMIC_RELEASE);
+    th->ret_channel = ret_channel;
 
     flb_trace("[thread %p] created (custom data at %p, size=%lu",
               th, FLB_THREAD_DATA(th), data_size);
