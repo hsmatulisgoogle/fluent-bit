@@ -781,11 +781,11 @@ int flb_engine_start_workers(struct flb_config *config)
                         flb_trace("[engine] not scheduling thread=%p as its already scheduled", th);
                         continue;
                     }
-                    flb_trace("[engine] scheduling thread=%p", th);
                     if (config->os_workers_len == 0 || th->desired_worker_id == FLB_THREAD_RUN_MAIN_ONLY){
                         flb_trace("[engine] resuming thread=%p", th);
                         flb_thread_resume(th);
                     } else if (th->desired_worker_id >= 0) {
+                        flb_trace("[engine] scheduling thread=%p on worker %d", th, next_out_thread);
                         ret = flb_pipe_w(config->os_workers_ch[1][next_out_thread], &th, sizeof(struct flb_thread *));
                         if (ret == -1) {
                             flb_errno();
@@ -796,6 +796,7 @@ int flb_engine_start_workers(struct flb_config *config)
 
                     } else {
                         for (int i=0; i < config->os_workers_len; i++){
+                            flb_trace("[engine] scheduling thread=%p on worker %d", th, next_out_thread);
                             ret = flb_pipe_w(config->os_workers_ch[1][next_out_thread], &th, sizeof(struct flb_thread *));
                             if (ret == -1) {
                                 flb_errno();
