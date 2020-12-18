@@ -768,7 +768,7 @@ int flb_engine_start_workers(struct flb_config *config)
                 u_conn = (struct flb_upstream_conn *) event;
                 th = u_conn->thread;
                 if (th) {
-                    if (!__atomic_test_and_set (&th->scheduled, __ATOMIC_SEQ_CST)){
+                    if (__atomic_test_and_set (&th->scheduled, __ATOMIC_SEQ_CST)){
                         // This is already scheduled
                         continue;
                     }
