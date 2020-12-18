@@ -436,9 +436,8 @@ struct flb_engine_worker_argument {
 
 void flb_engine_worker(void *arguments_struct)
 {
-    #define MAX_WORKER_NAME_SIZE 100
     int ret;
-    char worker_name[MAX_WORKER_NAME_SIZE];
+    char *worker_name = "flb-engine-worker";
     struct mk_event *event;
 
     // Unpack arguments and free struct containing them
@@ -448,14 +447,6 @@ void flb_engine_worker(void *arguments_struct)
     flb_pipefd_t channel = config->os_workers_ch[0][worker_id];
     flb_free(arguments_struct);
 
-    // Name the worker thread
-    ret = snprintf(worker_name, MAX_WORKER_NAME_SIZE, "flb-output-worker-%d", worker_id);
-    if (ret < 0){
-        // Report error and stop engine
-        flb_error("[engine] failed to initialize output worker %d", worker_id);
-        flb_engine_exit(config);
-        return;
-    }
     mk_utils_worker_rename(worker_name);
 
 
@@ -474,7 +465,7 @@ void flb_engine_worker(void *arguments_struct)
                 u_conn = (struct flb_upstream_conn *) event;
                 th = u_conn->thread;
                 if (th) {
-                    flb_trace("[engine] resuming thread=%p", th);
+                    printf("[%s-%d] resuming thread=%p\n", worker_name, worker_id, th);
                     flb_thread_resume(th);
                 }
             } else {
@@ -490,6 +481,7 @@ void flb_engine_worker(void *arguments_struct)
                     flb_engine_exit(config);
                     return;
                 }
+                printf("[%s-%d] resuming thread=%p from pipe\n", worker_name, worker_id, th);
                 flb_thread_resume(th);
             }
         }
