@@ -44,6 +44,7 @@
 #include <fluent-bit/flb_sosreport.h>
 #include <fluent-bit/flb_storage.h>
 #include <fluent-bit/flb_http_server.h>
+#include <unistd.h>
 
 #ifdef FLB_HAVE_METRICS
 #include <fluent-bit/flb_metrics_exporter.h>
@@ -484,6 +485,7 @@ void flb_engine_worker(void *arguments_struct)
                 printf("[%s-%d] resuming thread=%p from pipe\n", worker_name, worker_id, th);
                 flb_thread_resume(th);
             }
+            sleep(2);
         }
     }
 }
