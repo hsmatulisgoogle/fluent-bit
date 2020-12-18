@@ -452,7 +452,7 @@ void flb_engine_worker(void *arguments_struct)
     ret = snprintf(worker_name, MAX_WORKER_NAME_SIZE, "flb-output-worker-%d", worker_id);
     if (ret < 0){
         // Report error and stop engine
-        prinf("[%s] failed to initialize output worker %d\n", worker_name, worker_id);
+        printf("[%s] failed to initialize output worker %d\n", worker_name, worker_id);
         flb_engine_exit(config);
         return;
     }
