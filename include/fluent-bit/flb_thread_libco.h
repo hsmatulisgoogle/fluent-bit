@@ -115,7 +115,7 @@ static FLB_INLINE void flb_thread_resume(struct flb_thread *th)
     pthread_setspecific(flb_thread_key, (void *) th);
 
     if(th->returned) {
-        flb_error("[thread] running coroutine that already returned");
+        flb_error("[thread] running thread=%p that already returned", th);
         return;
     }
 
