@@ -110,9 +110,22 @@ static FLB_INLINE void flb_thread_destroy(struct flb_thread *th)
 }
 
 
+#include <stdio.h>
+#include <execinfo.h>
+#include <stdlib.h>
+static void print_stack_trace___(char *caller) {
+    void *array[20];
+    size_t size;
+    printf("Stack Trace Start for %s\n",caller);
+    size = backtrace(array, 20);
+    backtrace_symbols_fd(array, size, 2);
+    printf("Stack Trace End\n");
+}
+
 static FLB_INLINE void flb_thread_resume(struct flb_thread *th)
 {
     pthread_setspecific(flb_thread_key, (void *) th);
+    print_stack_trace___("thread_resume");
 
     if(th->returned) {
         flb_error("[thread] running thread=%p that already returned", th);
