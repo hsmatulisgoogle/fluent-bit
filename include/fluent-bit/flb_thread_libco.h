@@ -128,7 +128,7 @@ static FLB_INLINE void flb_thread_resume(struct flb_thread *th)
             flb_errno();
         }
     } else {
-        __atomic_clear(&th->scheduled, __ATOMIC_RELEASE);
+        __atomic_clear(&th->scheduled, __ATOMIC_SEQ_CST);
     }
 
 }
@@ -160,7 +160,7 @@ static FLB_INLINE struct flb_thread *flb_thread_new(size_t data_size,
     th->desired_worker_id = desired_worker_id;
     th->returned = 0;
     th->return_val = (uint64_t) 0;
-    __atomic_clear(&th->scheduled, __ATOMIC_RELEASE);
+    __atomic_clear(&th->scheduled, __ATOMIC_SEQ_CST);
     th->ret_channel = ret_channel;
 
     flb_trace("[thread %p] created (custom data at %p, size=%lu",

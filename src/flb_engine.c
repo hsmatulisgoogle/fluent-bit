@@ -436,9 +436,8 @@ struct flb_engine_worker_argument {
 
 void flb_engine_worker(void *arguments_struct)
 {
-    #define MAX_WORKER_NAME_SIZE 100
     int ret;
-    char worker_name[MAX_WORKER_NAME_SIZE];
+    char *worker_name = "flb-engine-worker";
     struct mk_event *event;
 
     // Unpack arguments and free struct containing them
@@ -448,6 +447,7 @@ void flb_engine_worker(void *arguments_struct)
     flb_pipefd_t channel = config->os_workers_ch[0][worker_id];
     flb_free(arguments_struct);
 
+<<<<<<< HEAD
     // Name the worker thread
     ret = snprintf(worker_name, MAX_WORKER_NAME_SIZE, "flb-output-worker-%d", worker_id);
     if (ret < 0){
@@ -456,6 +456,8 @@ void flb_engine_worker(void *arguments_struct)
         flb_engine_exit(config);
         return;
     }
+=======
+>>>>>>> flb_procs
     mk_utils_worker_rename(worker_name);
 
 
@@ -474,7 +476,11 @@ void flb_engine_worker(void *arguments_struct)
                 u_conn = (struct flb_upstream_conn *) event;
                 th = u_conn->thread;
                 if (th) {
+<<<<<<< HEAD
                     printf("[%n] resuming thread=%p\n", worker_name, th);
+=======
+                    printf("[%s-%d] resuming thread=%p\n", worker_name, worker_id, th);
+>>>>>>> flb_procs
                     flb_thread_resume(th);
                 }
             } else {
@@ -490,7 +496,11 @@ void flb_engine_worker(void *arguments_struct)
                     flb_engine_exit(config);
                     return;
                 }
+<<<<<<< HEAD
                 printf("[%n] resuming thread=%p from pipe\n", worker_name, th);
+=======
+                printf("[%s-%d] resuming thread=%p from pipe\n", worker_name, worker_id, th);
+>>>>>>> flb_procs
                 flb_thread_resume(th);
             }
         }
@@ -777,7 +787,7 @@ int flb_engine_start_workers(struct flb_config *config)
                 u_conn = (struct flb_upstream_conn *) event;
                 th = u_conn->thread;
                 if (th) {
-                    if (!__atomic_test_and_set (&th->scheduled, __ATOMIC_ACQUIRE)){
+                    if (!__atomic_test_and_set (&th->scheduled, __ATOMIC_SEQ_CST)){
                         // This is already scheduled
                         flb_trace("[engine] not scheduling thread=%p as its already scheduled", th);
                         continue;
@@ -786,13 +796,12 @@ int flb_engine_start_workers(struct flb_config *config)
                         flb_trace("[engine] resuming thread=%p", th);
                         flb_thread_resume(th);
                     } else if (th->desired_worker_id >= 0) {
-                        flb_trace("[engine] scheduling thread=%p on worker %d", th, next_out_thread);
-                        ret = flb_pipe_w(config->os_workers_ch[1][next_out_thread], &th, sizeof(struct flb_thread *));
+                        ret = flb_pipe_w(config->os_workers_ch[1][th->desired_worker_id], &th, sizeof(struct flb_thread *));
                         if (ret == -1) {
                             flb_errno();
-                            flb_error("[engine] cannot send work to worker %d but thread %p can only be scheduled there", next_out_thread, th);
+                            flb_error("[engine] cannot send work to worker %d but thread %p can only be scheduled there", th->desired_worker_id, th);
                         } else if (ret == 0){
-                            flb_error("[engine] cannot send work to worker %d (EOF) but thread %p can only be scheduled there", next_out_thread, th);
+                            flb_error("[engine] cannot send work to worker %d (EOF) but thread %p can only be scheduled there", th->desired_worker_id, th);
                         }
 
                     } else {
