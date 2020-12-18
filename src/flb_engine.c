@@ -769,13 +769,14 @@ int flb_engine_start_workers(struct flb_config *config)
                 th = u_conn->thread;
                 if (th) {
                     if (__atomic_test_and_set (&th->scheduled, __ATOMIC_SEQ_CST)){
-                        // This is already scheduled
+                        flb_trace("[engine] not resuming thread=%p as it is already scheduled", th);
                         continue;
                     }
                     if (config->os_workers_len == 0 || th->desired_worker_id == FLB_THREAD_RUN_MAIN_ONLY){
-                        flb_trace("[engine] resuming thread=%p", th);
+                        flb_trace("[engine] resuming thread=%p on main thread", th);
                         flb_thread_resume(th);
                     } else if (th->desired_worker_id >= 0) {
+                        flb_trace("[engine] resuming thread=%p on worker %d", th, th->desired_worker);
                         ret = flb_pipe_w(config->os_workers_ch[1][th->desired_worker_id], &th, sizeof(struct flb_thread *));
                         if (ret == -1) {
                             flb_errno();
@@ -786,6 +787,7 @@ int flb_engine_start_workers(struct flb_config *config)
 
                     } else {
                         for (int i=0; i < config->os_workers_len; i++){
+                            flb_trace("[engine] resuming thread=%p on worker %d (attempt %d)", th, next_out_thread, i);
                             ret = flb_pipe_w(config->os_workers_ch[1][next_out_thread], &th, sizeof(struct flb_thread *));
                             if (ret == -1) {
                                 flb_errno();
