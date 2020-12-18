@@ -465,7 +465,7 @@ void flb_engine_worker(void *arguments_struct)
                 u_conn = (struct flb_upstream_conn *) event;
                 th = u_conn->thread;
                 if (th) {
-                    printf("[%s-%d] resuming thread=%p\n", worker_name, worker_id, th);
+                    flb_trace("[%s-%d] resuming thread=%p\n", worker_name, worker_id, th);
                     flb_thread_resume(th);
                 }
             } else {
@@ -481,7 +481,7 @@ void flb_engine_worker(void *arguments_struct)
                     flb_engine_exit(config);
                     return;
                 }
-                printf("[%s-%d] resuming thread=%p from pipe\n", worker_name, worker_id, th);
+                flb_trace("[%s-%d] resuming thread=%p from pipe\n", worker_name, worker_id, th);
                 flb_thread_resume(th);
             }
         }
