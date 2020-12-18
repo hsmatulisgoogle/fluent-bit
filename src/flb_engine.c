@@ -776,12 +776,12 @@ int flb_engine_start_workers(struct flb_config *config)
                         flb_trace("[engine] resuming thread=%p", th);
                         flb_thread_resume(th);
                     } else if (th->desired_worker_id >= 0) {
-                        ret = flb_pipe_w(config->os_workers_ch[1][next_out_thread], &th, sizeof(struct flb_thread *));
+                        ret = flb_pipe_w(config->os_workers_ch[1][th->desired_worker_id], &th, sizeof(struct flb_thread *));
                         if (ret == -1) {
                             flb_errno();
-                            flb_error("[engine] cannot send work to worker %d but thread %p can only be scheduled there", next_out_thread, th);
+                            flb_error("[engine] cannot send work to worker %d but thread %p can only be scheduled there", th->desired_worker_id, th);
                         } else if (ret == 0){
-                            flb_error("[engine] cannot send work to worker %d (EOF) but thread %p can only be scheduled there", next_out_thread, th);
+                            flb_error("[engine] cannot send work to worker %d (EOF) but thread %p can only be scheduled there", th->desired_worker_id, th);
                         }
 
                     } else {
