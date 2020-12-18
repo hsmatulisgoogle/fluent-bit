@@ -85,6 +85,7 @@ int flb_engine_dispatch_retry(struct flb_task_retry *retry,
     }
 
     flb_task_add_thread(th, task);
+    flb_error("[engine_dispatch] retrying with thread=%p", th);
     flb_thread_resume(th);
 
     return 0;
@@ -200,6 +201,7 @@ static int tasks_start(struct flb_input_instance *in,
                                    task->buf, task->size,
                                    task->tag,
                                    task->tag_len);
+            flb_error("[engine_dispatch] starting thread=%p", th);
             flb_task_add_thread(th, task);
             flb_thread_resume(th);
         }
