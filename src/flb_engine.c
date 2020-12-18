@@ -789,7 +789,7 @@ int flb_engine_start_workers(struct flb_config *config)
 
                     } else {
                         for (int i=0; i < config->os_workers_len; i++){
-                            flb_error("[engine] scheduling thread=%p on worker %d", th, next_out_thread);
+                            flb_error("[engine] scheduling thread=%p on worker %d (attempt %d)", th, next_out_thread, i);
                             ret = flb_pipe_w(config->os_workers_ch[1][next_out_thread], &th, sizeof(struct flb_thread *));
                             if (ret == -1) {
                                 flb_errno();
