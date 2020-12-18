@@ -778,8 +778,10 @@ int flb_engine_start_workers(struct flb_config *config)
                 if (th) {
                     if (!__atomic_test_and_set (&th->scheduled, __ATOMIC_ACQUIRE)){
                         // This is already scheduled
+                        flb_trace("[engine] not scheduling thread=%p as its already scheduled", th);
                         continue;
                     }
+                    flb_trace("[engine] scheduling thread=%p", th);
                     if (config->os_workers_len == 0 || th->desired_worker_id == FLB_THREAD_RUN_MAIN_ONLY){
                         flb_trace("[engine] resuming thread=%p", th);
                         flb_thread_resume(th);
