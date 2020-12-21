@@ -317,8 +317,10 @@ static struct flb_upstream_conn *create_conn(struct flb_upstream *u)
 
     MK_EVENT_ZERO(&conn->event);
 
+    LOCK_OR_RETURN(&u->connection_pool_mutex, NULL);
     /* Link new connection to the busy queue */
     mk_list_add(&conn->_head, &u->busy_queue);
+    UNLOCK_OR_RETURN(&u->connection_pool_mutex, NULL);
 
     /* Increase counter */
     u->n_connections++;
@@ -407,8 +409,8 @@ struct flb_upstream_conn *flb_upstream_conn_get(struct flb_upstream *u)
     LOCK_OR_RETURN(&u->connection_pool_mutex, NULL);
     /* On non Keepalive mode, always create a new TCP connection */
     if (u->net.keepalive == FLB_FALSE) {
-        conn = create_conn(u);
         UNLOCK_OR_RETURN(&u->connection_pool_mutex, NULL);
+        return create_conn(u);
     }
 
     /*
@@ -455,7 +457,8 @@ struct flb_upstream_conn *flb_upstream_conn_get(struct flb_upstream *u)
 
     /* No keepalive connection available, create a new one */
     if (!conn) {
-        conn = create_conn(u);
+        UNLOCK_OR_RETURN(&u->connection_pool_mutex, NULL);
+        return create_conn(u);
     }
 
     UNLOCK_OR_RETURN(&u->connection_pool_mutex, NULL);
