@@ -492,7 +492,7 @@ void flb_engine_worker(void *arguments_struct)
 int flb_engine_start_workers(struct flb_config *config)
 {
     int ret;
-    config->os_workers_len = 1;
+    config->os_workers_len = 4;
     if (config->os_workers_len <= 0) {
         return 0;
     }
