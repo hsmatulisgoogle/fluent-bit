@@ -240,6 +240,13 @@ struct flb_oauth2 *flb_oauth2_create(struct flb_config *config,
     return NULL;
 }
 
+
+/* Clear the current payload */
+void flb_oauth2_payload_clear(struct flb_oauth2 *ctx)
+{
+    ctx->payload[0] = '\0';
+}
+
 /* Append a key/value to the request body */
 int flb_oauth2_payload_append(struct flb_oauth2 *ctx,
                               const char *key_str, int key_len,

@@ -205,12 +205,7 @@ static int get_oauth2_token(struct flb_stackdriver *ctx)
     time_t expires;
     char payload[1024];
 
-    /* Create oauth2 context */
-    ctx->o = flb_oauth2_create(ctx->config, FLB_STD_AUTH_URL, 3000);
-    if (!ctx->o) {
-        flb_plg_error(ctx->ins, "cannot create oauth2 context");
-        return -1;
-    }
+    flb_oauth2_payload_clear(ctx->o);
 
     /* In case of using metadata server, fetch token from there */
     if (ctx->metadata_server_auth) {
@@ -277,11 +272,8 @@ static char *get_google_token(struct flb_stackdriver *ctx)
         return NULL;
     }
 
-    if (!ctx->o) {
-        ret = get_oauth2_token(ctx);
-    }
-    else if (flb_oauth2_token_expired(ctx->o) == FLB_TRUE) {
-        flb_oauth2_destroy(ctx->o);
+
+    if (flb_oauth2_token_expired(ctx->o) == FLB_TRUE) {
         ret = get_oauth2_token(ctx);
     }
 
@@ -881,6 +873,13 @@ static int cb_stackdriver_init(struct flb_output_instance *ins,
     }
     if (!ctx->metadata_u) {
         flb_plg_error(ctx->ins, "metadata upstream creation failed");
+        return -1;
+    }
+
+    /* Create oauth2 context */
+    ctx->o = flb_oauth2_create(ctx->config, FLB_STD_AUTH_URL, 3000);
+    if (!ctx->o) {
+        flb_plg_error(ctx->ins, "cannot create oauth2 context");
         return -1;
     }
 
