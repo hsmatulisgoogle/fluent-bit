@@ -41,6 +41,23 @@
 
 #define FLB_TLS_CLIENT   "Fluent Bit"
 
+
+#include <pthread.h>
+
+#define LOCK_OR_RETURN(mutex, ret)  {           \
+        if (pthread_mutex_lock(mutex)){         \
+            flb_error("error locking mutex");   \
+            return ret;                         \
+        }                                       \
+    }
+#define UNLOCK_OR_RETURN(mutex, ret)  {         \
+        if (pthread_mutex_unlock(mutex)){       \
+            flb_error("error locking mutex");   \
+            return ret;                         \
+        }                                       \
+    }
+
+
 #define io_tls_error(ret) _io_tls_error(ret, __FILE__, __LINE__)
 
 void _io_tls_error(int ret, char *file, int line)
@@ -329,10 +346,12 @@ int net_io_tls_handshake(void *_u_conn, void *_th)
     struct flb_upstream *u = u_conn->u;
     struct flb_thread *th = _th;
 
+    LOCK_OR_RETURN(&u->connection_pool_mutex, -1);
     session = flb_tls_session_new(u->tls->context);
     if (!session) {
         flb_error("[io_tls] could not create TLS session for %s:%i",
                   u->tcp_host, u->tcp_port);
+        UNLOCK_OR_RETURN(&u->connection_pool_mutex, -1);
         return -1;
     }
     if (!u->tls->context->vhost) {
@@ -350,6 +369,7 @@ int net_io_tls_handshake(void *_u_conn, void *_th)
     mbedtls_ssl_set_bio(&session->ssl,
                         &u_conn->tls_net_context,
                         mbedtls_net_send, mbedtls_net_recv, NULL);
+    UNLOCK_OR_RETURN(&u->connection_pool_mutex, -1);
 
  retry_handshake:
     ret = mbedtls_ssl_handshake(&session->ssl);
