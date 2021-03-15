@@ -11,6 +11,12 @@
 #include <assert.h>
 #include <stdlib.h>
 
+#ifdef FLB_SYSTEM_WINDOWS
+#include <monkey/mk_core/external/winpthreads.h>
+#else
+#include <pthread.h>
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -126,13 +132,17 @@ cothread_t co_active() {
   return co_active_handle;
 }
 
+
+static void co_init_and_set(){
+  co_init();
+  co_swap = (void (*)(cothread_t, cothread_t))co_swap_function;
+}
+
 cothread_t co_create(unsigned int size, void (*entrypoint)(void),
                      size_t *out_size){
   cothread_t handle;
-  if(!co_swap) {
-    co_init();
-    co_swap = (void (*)(cothread_t, cothread_t))co_swap_function;
-  }
+  pthread_once_t once_control = PTHREAD_ONCE_INIT;
+  pthread_once(once_control, co_init_and_set)
 
   if(!co_active_handle) co_active_handle = &co_active_buffer;
   size += 512;  /* allocate additional space for storage */
